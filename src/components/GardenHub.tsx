@@ -1,64 +1,29 @@
-import { useEffect, useState } from 'react';
-import { useGardenData } from '../hooks/useGardenData';
-import { addTask, completeTask, addLog } from '../services/gardenService';
-import { generateTasksForPlants } from '../services/taskEngine';
+import { useFirebase } from '../contexts/FirebaseContext';
 
-const GardenHub = ({ user, plants }: any) => {
-  const { tasks, logs } = useGardenData(user.uid);
-  const [newLog, setNewLog] = useState('');
+/**
+ * Signed-in home. Batch A only keeps this route from crashing and from
+ * writing tasks when it opens. The attention list is added in a later batch.
+ */
+export default function GardenHub() {
+  const { user, loading } = useFirebase();
 
-  useEffect(() => {
-    const autoTasks = generateTasksForPlants(plants, user.uid);
-
-    autoTasks.forEach(t => addTask(t));
-  }, [plants]);
-
-  const handleComplete = async (id: string) => {
-    await completeTask(id);
-    window.location.reload();
-  };
-
-  const handleLog = async () => {
-    if (!newLog) return;
-
-    await addLog({
-      message: newLog,
-      createdAt: new Date().toISOString(),
-      ownerUid: user.uid
-    });
-
-    setNewLog('');
-    window.location.reload();
-  };
+  if (loading) {
+    return (
+      <div className="min-h-[50vh] flex items-center justify-center">
+        <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
-    <div style={{ padding: 20 }}>
-      <h2>🌿 Garden Dashboard</h2>
-
-      <h3>📅 Tasks</h3>
-      {tasks.map((t: any) => (
-        <div key={t.id}>
-          <span>{t.title}</span>
-          {!t.completed && (
-            <button onClick={() => handleComplete(t.id)}>Done</button>
-          )}
-        </div>
-      ))}
-
-      <h3>📝 Quick Log</h3>
-      <input
-        value={newLog}
-        onChange={e => setNewLog(e.target.value)}
-        placeholder="What happened?"
-      />
-      <button onClick={handleLog}>Add</button>
-
-      <h3>📜 Activity</h3>
-      {logs.map((l: any) => (
-        <div key={l.id}>{l.message}</div>
-      ))}
+    <div className="max-w-3xl mx-auto px-6 py-10 space-y-4">
+      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-primary">Home</p>
+      <h1 className="font-headline text-5xl font-black tracking-tighter italic text-primary">Today</h1>
+      <p className="text-on-surface-variant font-medium max-w-xl leading-relaxed">
+        {user
+          ? 'Nothing is listed here yet. Opening this screen does not add tasks or change your plots and plants.'
+          : 'Sign in to see your garden.'}
+      </p>
     </div>
   );
-};
-
-export default GardenHub;
+}

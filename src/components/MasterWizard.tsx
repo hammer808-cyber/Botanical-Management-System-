@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { X, Target, Stethoscope, Sprout, Eye, ArrowRight, Check } from 'lucide-react';
 import WeedWarriorWizard from './WeedWarriorWizard';
 import BotanicalPatientWizard from './BotanicalPatientWizard';

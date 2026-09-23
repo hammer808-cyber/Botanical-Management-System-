@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, X, Target, Stethoscope, Sprout, Eye } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import MasterWizard from './MasterWizard';
 
 const GlobalActionHub: React.FC = () => {
