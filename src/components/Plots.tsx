@@ -149,6 +149,7 @@ export default function Plots() {
       for (const d of inhabitantsSnap.docs) {
         await updateDoc(doc(db, 'inhabitants', d.id), {
           plotId: null,
+          planterId: null,
           gridPosition: { x: 0, y: 0 }
         });
       }

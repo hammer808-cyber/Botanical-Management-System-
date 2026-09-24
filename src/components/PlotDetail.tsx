@@ -443,13 +443,39 @@ export default function PlotDetail() {
         // Beds stay inside the plot outline
         const newX = Math.max(0, Math.min(COLS - planter.size.w, planter.gridPosition.x + xDiff));
         const newY = Math.max(0, Math.min(ROWS - planter.size.h, planter.gridPosition.y + yDiff));
-        
+
         try {
           await updateDoc(doc(db, 'planters', planter.id), {
             gridPosition: { x: newX, y: newY }
           });
         } catch (error) {
           handleFirestoreError(error, OperationType.UPDATE, `planters/${planter.id}`);
+        }
+
+        // Plants riding the bed move with it: same shift, clamped to the plot.
+        // Plants with no planterId link yet but sitting inside the bed's old
+        // footprint get adopted so legacy placements heal themselves.
+        const dx = newX - planter.gridPosition.x;
+        const dy = newY - planter.gridPosition.y;
+        if (dx !== 0 || dy !== 0) {
+          const riders = inhabitants.filter(p =>
+            p.planterId === planter.id ||
+            (!p.planterId &&
+              p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w &&
+              p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h)
+          );
+          for (const r of riders) {
+            const rx = Math.max(0, Math.min(COLS - 1, (r.gridPosition?.x || 0) + dx));
+            const ry = Math.max(0, Math.min(ROWS - 1, (r.gridPosition?.y || 0) + dy));
+            try {
+              await updateDoc(doc(db, 'inhabitants', r.id), {
+                gridPosition: { x: rx, y: ry },
+                planterId: planter.id,
+              });
+            } catch (error) {
+              handleFirestoreError(error, OperationType.UPDATE, `inhabitants/${r.id}`);
+            }
+          }
         }
       }
     } else if (active.data.current?.type === 'plant') {
@@ -463,6 +489,7 @@ export default function PlotDetail() {
             await updateDoc(doc(db, 'inhabitants', inhabitant.id), {
               plotId: plotId,
               gridPosition: newPos,
+              planterId: targetPlanter.id,
               // First real placement: Pending -> Planted
               ...(inhabitant.status === 'Pending' ? { status: 'Planted' as const } : {}),
               updatedAt: serverTimestamp()
@@ -486,6 +513,7 @@ export default function PlotDetail() {
             await updateDoc(doc(db, 'inhabitants', inhabitant.id), {
               plotId: plotId,
               gridPosition: { x: newX, y: newY },
+              planterId: null,
               // First real placement: Pending -> Planted
               ...(inhabitant.status === 'Pending' ? { status: 'Planted' as const } : {}),
               updatedAt: serverTimestamp()
@@ -507,6 +535,28 @@ export default function PlotDetail() {
   const updatePlanter = async (id: string, updates: Partial<Planter>) => {
     try {
       await updateDoc(doc(db, 'planters', id), updates);
+      // If the bed was resized/moved, pull its riders back inside the new footprint
+      const planter = planters.find(p => p.id === id);
+      if (planter && (updates.size || updates.gridPosition)) {
+        const size = updates.size || planter.size;
+        const pos = updates.gridPosition || planter.gridPosition;
+        const riders = inhabitants.filter(p =>
+          p.planterId === id ||
+          (!p.planterId &&
+            p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w &&
+            p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h)
+        );
+        for (const r of riders) {
+          const rx = Math.max(pos.x, Math.min(pos.x + size.w - 1, r.gridPosition?.x || 0));
+          const ry = Math.max(pos.y, Math.min(pos.y + size.h - 1, r.gridPosition?.y || 0));
+          if (rx !== r.gridPosition?.x || ry !== r.gridPosition?.y || r.planterId !== id) {
+            await updateDoc(doc(db, 'inhabitants', r.id), {
+              gridPosition: { x: rx, y: ry },
+              planterId: id,
+            });
+          }
+        }
+      }
       toast.success('Planter updated');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `planters/${id}`);
@@ -518,10 +568,15 @@ export default function PlotDetail() {
     const id = itemToDelete.id;
     setIsDeletingConfirmed(true);
     try {
-      const inhabitantsInPlanter = inhabitants.filter(p => p.gridPosition.x >= planters.find(pl => pl.id === id)!.gridPosition.x && p.gridPosition.x < planters.find(pl => pl.id === id)!.gridPosition.x + planters.find(pl => pl.id === id)!.size.w && p.gridPosition.y >= planters.find(pl => pl.id === id)!.gridPosition.y && p.gridPosition.y < planters.find(pl => pl.id === id)!.gridPosition.y + planters.find(pl => pl.id === id)!.size.h);
+      const inhabitantsInPlanter = inhabitants.filter(p =>
+        p.planterId === id ||
+        (!p.planterId &&
+          p.gridPosition.x >= planters.find(pl => pl.id === id)!.gridPosition.x && p.gridPosition.x < planters.find(pl => pl.id === id)!.gridPosition.x + planters.find(pl => pl.id === id)!.size.w && p.gridPosition.y >= planters.find(pl => pl.id === id)!.gridPosition.y && p.gridPosition.y < planters.find(pl => pl.id === id)!.gridPosition.y + planters.find(pl => pl.id === id)!.size.h)
+      );
       for (const inhabitant of inhabitantsInPlanter) {
         await updateDoc(doc(db, 'inhabitants', inhabitant.id), {
           gridPosition: { x: 0, y: 0 },
+          planterId: null,
           // Back to the rail: Planted -> Pending
           ...(inhabitant.status === 'Planted' ? { status: 'Pending' as const } : {}),
         });
@@ -550,14 +605,23 @@ export default function PlotDetail() {
         size: newSize,
         gridPosition: { x: newX, y: newY }
       });
-      // Plants riding in the bed keep riding: move them to the bed's new origin
+      // Plants riding in the bed keep riding: shift them by the same delta the
+      // bed moved, clamped inside the bed's new footprint so the arrangement
+      // survives the rotation instead of stacking at the origin.
+      const dx = newX - planter.gridPosition.x;
+      const dy = newY - planter.gridPosition.y;
       const riders = inhabitants.filter(p =>
-        p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w &&
-        p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h
+        p.planterId === id ||
+        (!p.planterId &&
+          p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w &&
+          p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h)
       );
       for (const r of riders) {
+        const rx = Math.max(newX, Math.min(newX + newSize.w - 1, (r.gridPosition?.x || 0) + dx));
+        const ry = Math.max(newY, Math.min(newY + newSize.h - 1, (r.gridPosition?.y || 0) + dy));
         await updateDoc(doc(db, 'inhabitants', r.id), {
-          gridPosition: { x: newX, y: newY }
+          gridPosition: { x: rx, y: ry },
+          planterId: id,
         });
       }
       toast.success('Bed rotated');
@@ -631,6 +695,7 @@ export default function PlotDetail() {
         const data = d.data();
         await updateDoc(doc(db, 'inhabitants', d.id), {
           plotId: null,
+          planterId: null,
           gridPosition: { x: 0, y: 0 },
           // Back to unassigned: Planted -> Pending
           ...(data.status === 'Planted' ? { status: 'Pending' } : {})
@@ -915,8 +980,10 @@ export default function PlotDetail() {
           const planter = planters.find(p => p.id === selectedPlanterId);
           if (!planter) return null;
           const bedPlants = inhabitants.filter(p =>
-            p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w &&
-            p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h
+            p.planterId === planter.id ||
+            (!p.planterId &&
+              p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w &&
+              p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h)
           );
           return (
             <motion.div
@@ -1719,7 +1786,7 @@ export default function PlotDetail() {
 
                 <div className="flex gap-3">
                   <button 
-                    onClick={() => { setItemToDelete({ id: plotId, type: 'plot' }); setShowDeleteModal(true); }}
+                    onClick={() => { setIsEditingPlot(false); setItemToDelete({ id: plotId, type: 'plot' }); setShowDeleteModal(true); }}
                     className="p-5 bg-red-50 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all shadow-sm"
                     title="Delete Plot"
                   >
@@ -1929,7 +1996,7 @@ export default function PlotDetail() {
                     )}
                   </button>
                   <button 
-                    onClick={() => { setItemToDelete({ id: editingPlanter.id, type: 'planter' }); setShowDeleteModal(true); }}
+                    onClick={() => { setEditingPlanter(null); setItemToDelete({ id: editingPlanter.id, type: 'planter' }); setShowDeleteModal(true); }}
                     className="p-4 bg-red-50 text-red-500 rounded-2xl hover:bg-red-100 transition-colors"
                   >
                     <Trash2 size={24} />
