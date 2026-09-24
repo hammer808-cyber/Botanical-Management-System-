@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { format, addDays } from 'date-fns';
 import DatePicker from 'react-datepicker';
@@ -53,7 +53,8 @@ import {
   Map as MapIcon,
   Tag,
   Target,
-  AlertTriangle
+  AlertTriangle,
+  ShieldAlert
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { logEvent } from '../services/eventService';
@@ -87,6 +88,9 @@ import {
   type CompanionConflict,
   BOTANICAL_RELATIONS
 } from '../services/botanyService';
+import { getThreatsForPlant, type PlantThreat } from '../constants/threats';
+import PlantHealthDrawer from './PlantHealthDrawer';
+import ThreatCard from './ThreatCard';
 
 const GRID_SIZE = 30; // 30x20
 const CELL_SIZE = 24; // pixels
@@ -372,10 +376,44 @@ export default function PlotDetail() {
     return { conflictMap: map, conflictList: list };
   }, [inhabitants]);
 
+  // Plant health drawer + tap-vs-drag guard (a drag that travels
+  // must not open the drawer on release)
+  const [selectedPlant, setSelectedPlant] = useState<Inhabitant | null>(null);
+  const suppressClickRef = useRef(false);
+
+  const handleSelectPlant = (p: Inhabitant) => {
+    if (suppressClickRef.current) return;
+    setSelectedPlant(p);
+  };
+
+  // Threat Watch: top threats across everything currently planted,
+  // high severity first, then by number of plants affected.
+  const threatWatch = useMemo(() => {
+    const byId = new Map<string, { threat: PlantThreat; plants: string[] }>();
+    inhabitants.forEach((p) => {
+      getThreatsForPlant(p.name).forEach((t) => {
+        const entry = byId.get(t.id) ?? { threat: t, plants: [] as string[] };
+        if (!entry.plants.includes(p.name)) entry.plants.push(p.name);
+        byId.set(t.id, entry);
+      });
+    });
+    const rank: Record<PlantThreat['severity'], number> = { high: 0, medium: 1, low: 2 };
+    return [...byId.values()]
+      .sort((a, b) => rank[a.threat.severity] - rank[b.threat.severity] || b.plants.length - a.plants.length)
+      .slice(0, 5);
+  }, [inhabitants]);
+
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over, delta } = event;
     setActiveId(null);
     setActiveType(null);
+
+    // If the pointer actually traveled, this was a drag — don't let
+    // the release click open the plant health drawer.
+    if (Math.abs(delta.x) > 4 || Math.abs(delta.y) > 4) {
+      suppressClickRef.current = true;
+      setTimeout(() => { suppressClickRef.current = false; }, 200);
+    }
 
     if (!active || !user || !plotId) return;
 
@@ -991,6 +1029,26 @@ export default function PlotDetail() {
               </div>
             )}
 
+            {/* Threat Watch */}
+            {threatWatch.length > 0 && (
+              <div className="bg-white border border-stone-200/80 p-4 rounded-2xl space-y-3">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="text-emerald-700 shrink-0" size={18} />
+                  <p className="text-xs font-black text-stone-900 uppercase tracking-wider">
+                    Threat Watch
+                  </p>
+                </div>
+                <p className="text-[10px] font-medium text-stone-500 -mt-2">
+                  Top pests & diseases for what's planted — tap a plant on the bed for its full list.
+                </p>
+                <div className="space-y-2">
+                  {threatWatch.map(({ threat, plants }) => (
+                    <ThreatCard key={threat.id} threat={threat} affectedPlants={plants} compact />
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Case Manager Alerts */}
             {plot && (
               <div className="space-y-3">
@@ -1127,6 +1185,7 @@ export default function PlotDetail() {
                     activeLayer={activeLayer}
                     inhabitant={inhabitant}
                     hasConflict={conflictMap.has(inhabitant.id)}
+                    onSelect={handleSelectPlant}
                   />
                 ))}
 
@@ -1161,6 +1220,16 @@ export default function PlotDetail() {
           </div>
         </div>
       </DndContext>
+
+      {/* Plant health drawer: tap a plant for its pests, diseases & treatments */}
+      <PlantHealthDrawer
+        plant={selectedPlant}
+        onClose={() => setSelectedPlant(null)}
+        onLogTreatment={() => {
+          setSelectedPlant(null);
+          setIsAddingLog(true);
+        }}
+      />
 
       {/* Elite Botanical Insights Section */}
       <div className="px-6 mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -2156,7 +2225,7 @@ function PlanterItem({ planter, zoom, onEdit, inhabitants, activeLayer }: { plan
   );
 }
 
-function DraggableItem({ id, type, position, size, zoom, image, name, activeLayer, inhabitant, hasConflict }: { id: string, type: string, position: { x: number, y: number }, size: { w: number, h: number }, zoom: number, image?: string, name: string, activeLayer: string, inhabitant?: Inhabitant, hasConflict?: boolean }) {
+function DraggableItem({ id, type, position, size, zoom, image, name, activeLayer, inhabitant, hasConflict, onSelect }: { id: string, type: string, position: { x: number, y: number }, size: { w: number, h: number }, zoom: number, image?: string, name: string, activeLayer: string, inhabitant?: Inhabitant, hasConflict?: boolean, onSelect?: (inhabitant: Inhabitant) => void }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: id,
     data: { type: type }
@@ -2195,6 +2264,10 @@ function DraggableItem({ id, type, position, size, zoom, image, name, activeLaye
       onPointerDown={(e) => {
         e.stopPropagation();
         listeners?.onPointerDown(e);
+      }}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (inhabitant && onSelect) onSelect(inhabitant);
       }}
       className={cn(
         "rounded-full border-2 border-primary bg-white shadow-lg flex items-center justify-center overflow-hidden cursor-move active:cursor-grabbing hover:scale-110 hover:ring-4 transition-transform group botanical-tooltip",
