@@ -4,8 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Plotwise - Garden Planner</title>
-    <script type="module" crossorigin src="./assets/index-B2x_2Ah8.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-8Y045KqP.css">
+    <script>
+      // Restores the client-side route encoded by public/404.html after a
+      // GitHub Pages deep-link bounce (/?/plots -> /plots).
+      (function (l) {
+        if (l.search[1] === '/') {
+          var decoded = l.search
+            .slice(1)
+            .split('&')
+            .map(function (s) {
+              return s.replace(/~and~/g, '&');
+            })
+            .join('?');
+          window.history.replaceState(null, null, l.pathname.slice(0, -1) + decoded + l.hash);
+        }
+      })(window.location);
+    </script>
+    <script type="module" crossorigin src="/Botanical-Management-System-/assets/index-D5bvwQsk.js"></script>
+    <link rel="stylesheet" crossorigin href="/Botanical-Management-System-/assets/index-8Y045KqP.css">
   </head>
   <body>
     <div id="root"></div>
