@@ -7,6 +7,9 @@ export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
     plugins: [react(), tailwindcss()],
+    // Relative asset paths so the production build works from any
+    // hosted subpath (e.g. GitHub Pages project sites).
+    base: './',
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
     },
