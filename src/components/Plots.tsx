@@ -8,14 +8,14 @@ import { toast } from 'sonner';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import BedBuildQuiz from './BedBuildQuiz';
+import PlotEditForm, { PlotEditData } from './PlotEditForm';
+import { countPlanted, countWaiting } from '../lib/plotStats';
 
 import { 
   Inhabitant, 
   SpatialPlot, 
   InhabitantStatus, 
   InhabitantType, 
-  PlotStatus, 
-  PlotHealth,
   Expense
 } from '../types';
 
@@ -37,16 +37,6 @@ export default function Plots() {
   const [plotToDelete, setPlotToDelete] = useState<string | null>(null);
   const [expenseToDelete, setExpenseToDelete] = useState<string | null>(null);
 
-  const [newPlot, setNewPlot] = useState({ 
-    name: '', 
-    description: '', 
-    status: 'Active' as PlotStatus,
-    soilType: 'Loam',
-    healthStatus: 'Stable' as PlotHealth,
-    notes: '',
-    plantFamily: '',
-    irrigationZone: ''
-  });
   const [newExpense, setNewExpense] = useState({ plotId: '', item: '', amount: '', category: 'Seeds', date: new Date().toISOString().split('T')[0] });
 
   useEffect(() => {
@@ -90,49 +80,7 @@ export default function Plots() {
       // Clear state to avoid reopening on refresh
       window.history.replaceState({}, document.title);
     }
-    if (location.state?.deletePlotId) {
-      setPlotToDelete(location.state.deletePlotId);
-      setShowDeleteModal(true);
-      // Clear state
-      window.history.replaceState({}, document.title);
-    }
   }, [location.state]);
-
-  const handleAddPlot = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || !newPlot.name || isSaving) return;
-
-    setIsSaving(true);
-    try {
-      const docRef = await addDoc(collection(db, 'spatial_plots'), {
-        ...newPlot,
-        ownerUid: user.uid,
-        createdAt: serverTimestamp(),
-        mapLayout: []
-      });
-      
-      toast.success('Plot created successfully');
-      
-      // Reset form
-      setNewPlot({ 
-        name: '', 
-        description: '', 
-        status: 'Active',
-        soilType: 'Loam',
-        healthStatus: 'Stable',
-        notes: '',
-        plantFamily: '',
-        irrigationZone: ''
-      });
-      
-      setShowAddPlot(false);
-      setIsSaving(false);
-      navigate(`/plots/${docRef.id}`);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'spatial_plots');
-      setIsSaving(false);
-    }
-  };
 
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -163,25 +111,15 @@ export default function Plots() {
     }
   };
 
-  const handleUpdatePlot = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUpdatePlot = async (data: PlotEditData) => {
     if (!user || !editingPlot || isSaving) return;
 
     setIsSaving(true);
     try {
-      await updateDoc(doc(db, 'spatial_plots', editingPlot.id), {
-        name: editingPlot.name,
-        description: editingPlot.description,
-        status: editingPlot.status,
-        soilType: editingPlot.soilType || 'Loam',
-        healthStatus: editingPlot.healthStatus || 'Stable',
-        notes: editingPlot.notes || '',
-        plantFamily: editingPlot.plantFamily || '',
-        irrigationZone: editingPlot.irrigationZone || ''
-      });
-      
+      await updateDoc(doc(db, 'spatial_plots', editingPlot.id), { ...data });
+
       toast.success('Plot updated');
-      
+
       setTimeout(() => {
         setShowEditPlot(false);
         setEditingPlot(null);
@@ -398,12 +336,16 @@ export default function Plots() {
               <ChevronRight size={20} className={cn("transition-transform group-hover:translate-x-1", selectedPlotId === 'all' ? "text-white" : "text-primary")} />
             </button>
 
-            {plots.map((plot) => (
+            {plots.map((plot) => {
+              const plotInhabitants = inhabitants.filter(p => p.plotId === plot.id);
+              const planted = countPlanted(plotInhabitants);
+              const waiting = countWaiting(plotInhabitants);
+              return (
               <div key={plot.id} className="relative group">
                 <div className="flex gap-2">
                     <Link 
                       to={`/plots/${plot.id}`}
-                      aria-label={`View details for plot ${plot.name}. ${inhabitants.filter(p => p.plotId === plot.id).length} inhabitants.`}
+                      aria-label={`View details for plot ${plot.name}. ${planted} planted${waiting > 0 ? `, ${waiting} waiting to place` : ''}.`}
                       className={cn(
                         "flex-1 p-6 rounded-[2rem] text-left transition-all border flex items-center justify-between group/card touch-target",
                         selectedPlotId === plot.id 
@@ -419,7 +361,7 @@ export default function Plots() {
                           )}
                         </div>
                         <span className={cn("text-xs font-medium truncate block", selectedPlotId === plot.id ? "text-white/70" : "text-on-surface-variant")}>
-                          {inhabitants.filter(p => p.plotId === plot.id).length} Inhabitants • {plot.description || 'No description'}
+                          {planted} planted{waiting > 0 ? ` • ${waiting} to place` : ''} • {plot.description || 'No description'}
                         </span>
                       </div>
                       <ChevronRight size={20} className={cn("transition-transform group-hover/card:translate-x-1", selectedPlotId === plot.id ? "text-white" : "text-secondary")} />
@@ -442,7 +384,8 @@ export default function Plots() {
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -537,7 +480,7 @@ export default function Plots() {
         )}
       </AnimatePresence>
 
-      {/* Edit Plot Modal */}
+      {/* Edit Plot Modal — shared form, same questions everywhere, pre-filled */}
       <AnimatePresence>
         {showEditPlot && editingPlot && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -552,7 +495,7 @@ export default function Plots() {
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative w-full max-w-lg bg-white rounded-[3rem] shadow-2xl overflow-hidden"
+              className="relative w-full max-w-lg bg-white rounded-[3rem] shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto"
             >
               <div className="p-8 space-y-8">
                 <div className="flex justify-between items-center">
@@ -562,122 +505,12 @@ export default function Plots() {
                   </button>
                 </div>
 
-                <form onSubmit={handleUpdatePlot} className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-4">Plot Name</label>
-                    <input 
-                      type="text"
-                      required
-                      value={editingPlot.name}
-                      onChange={(e) => setEditingPlot({ ...editingPlot, name: e.target.value })}
-                      className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-4">Description</label>
-                    <textarea 
-                      value={editingPlot.description}
-                      onChange={(e) => setEditingPlot({ ...editingPlot, description: e.target.value })}
-                      className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all min-h-[100px]"
-                    />
-                  </div>                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-4">Plant Family</label>
-                      <input 
-                        type="text"
-                        value={editingPlot.plantFamily || ''}
-                        onChange={(e) => setEditingPlot({ ...editingPlot, plantFamily: e.target.value })}
-                        className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-4">Irrigation Zone</label>
-                      <input 
-                        type="text"
-                        value={editingPlot.irrigationZone || ''}
-                        onChange={(e) => setEditingPlot({ ...editingPlot, irrigationZone: e.target.value })}
-                        className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-4">Soil Type</label>
-                      <select 
-                        value={editingPlot.soilType || 'Loam'}
-                        onChange={(e) => setEditingPlot({ ...editingPlot, soilType: e.target.value })}
-                        className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all appearance-none"
-                      >
-                        <option>Loam</option>
-                        <option>Clay</option>
-                        <option>Sandy</option>
-                        <option>Silt</option>
-                        <option>Peat</option>
-                        <option>Chalky</option>
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-4">Health Status</label>
-                      <select 
-                        value={editingPlot.healthStatus || 'Stable'}
-                        onChange={(e) => setEditingPlot({ ...editingPlot, healthStatus: e.target.value as PlotHealth })}
-                        className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all appearance-none"
-                      >
-                        <option value="Stable">Stable</option>
-                        <option value="Thriving">Thriving</option>
-                        <option value="Stressed">Stressed</option>
-                        <option value="Dormant">Dormant</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-4">Notes</label>
-                    <textarea 
-                      value={editingPlot.notes || ''}
-                      onChange={(e) => setEditingPlot({ ...editingPlot, notes: e.target.value })}
-                      className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all min-h-[80px]"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-4">Status</label>
-                    <select 
-                      value={editingPlot.status}
-                      onChange={(e) => setEditingPlot({ ...editingPlot, status: e.target.value as any })}
-                      className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all appearance-none"
-                    >
-                      <option value="Active">Active</option>
-                      <option value="Inactive">Inactive</option>
-                    </select>
-                  </div>
-
-                  <div className="flex gap-4">
-                    <button 
-                      type="button"
-                      onClick={() => setShowEditPlot(false)}
-                      className="flex-1 py-4 rounded-2xl font-black text-on-surface-variant hover:bg-surface-container-high transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button 
-                      type="submit"
-                      disabled={isSaving}
-                      className="flex-1 bg-primary text-white py-4 rounded-2xl font-black shadow-lg shadow-primary/20 hover:scale-[1.02] transition-all flex items-center justify-center gap-2"
-                    >
-                      {isSaving ? (
-                        <>
-                          <Check size={20} className="animate-bounce" />
-                          Saved!
-                        </>
-                      ) : (
-                        'Save Changes'
-                      )}
-                    </button>
-                  </div>
-                </form>
+                <PlotEditForm
+                  initial={editingPlot}
+                  isSaving={isSaving}
+                  onSave={handleUpdatePlot}
+                  onCancel={() => setShowEditPlot(false)}
+                />
               </div>
             </motion.div>
           </div>

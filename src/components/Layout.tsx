@@ -50,7 +50,7 @@ export default function Layout({ children, showBottomNav = true }: LayoutProps) 
 
   React.useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, 'plots'), where('ownerUid', '==', user.uid));
+    const q = query(collection(db, 'spatial_plots'), where('ownerUid', '==', user.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setPlots(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });

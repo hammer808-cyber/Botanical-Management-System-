@@ -364,7 +364,8 @@ export function calculateSuitabilityScore(
   if (sameFamilyHistory) score -= 15;
   
   // 3. Light/Microclimate (Simplified)
-  if (newPlant.sunExposure === plot.sunlight) score += 10;
+  const plotSun = (plot as any).sunExposure || plot.sunlight;
+  if (plotSun && newPlant.sunExposure === plotSun) score += 10;
   
   return Math.max(0, Math.min(100, score));
 }

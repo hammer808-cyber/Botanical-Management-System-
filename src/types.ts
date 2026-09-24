@@ -56,6 +56,7 @@ export type InhabitantStatus =
   | 'Flowering'
   | 'Vegetative'
   | 'Pending'
+  | 'Planted'
   | 'Thirsty';
 
 export type InhabitantType = 'Herb' | 'Vegetable' | 'Flower' | 'Annual' | 'Perennial';
@@ -164,7 +165,8 @@ export interface SpatialPlot {
   soilType?: string;
   plantFamily?: string;
   irrigationZone?: string;
-  sunlight?: string;
+  sunlight?: string; // legacy name; canonical field is sunExposure
+  sunExposure?: string;
   startDate?: string;
   endDate?: string;
   plantingDate?: string;

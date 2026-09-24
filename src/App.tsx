@@ -5,7 +5,6 @@ import GardenHub from './components/GardenHub';
 import Treatment from './components/Treatment';
 import Library from './components/Library';
 import Chat from './components/Chat';
-import GardenMap from './components/GardenMap';
 import PlantDetail from './components/PlantDetail';
 import Inventory from './components/Inventory';
 import Rules from './components/Rules';
@@ -55,7 +54,6 @@ function AppContent() {
           <Route path="/treatment" element={<Treatment />} />
           <Route path="/library" element={<Library />} />
           <Route path="/chat" element={<Chat />} />
-          <Route path="/map" element={<GardenMap />} />
           <Route path="/plant/:id" element={<PlantDetail />} />
           <Route path="/rules" element={<Rules />} />
           <Route path="/weeding" element={<Weeding />} />

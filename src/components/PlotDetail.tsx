@@ -29,8 +29,7 @@ import {
   Move, 
   Check, 
   ArrowLeft, 
-  Edit3, 
-  Save,
+  Edit3,
   Calendar,
   Activity,
   Info,
@@ -63,6 +62,8 @@ import { useFirebase } from '../contexts/FirebaseContext';
 import { GoogleGenAI, Type } from "@google/genai";
 import { toast } from 'sonner';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
+import PlotEditForm, { PlotEditData } from './PlotEditForm';
+import { isPlanted, countPlanted, countWaiting } from '../lib/plotStats';
 import WeedWarriorWizard from './WeedWarriorWizard';
 import TreatmentConflictModal from './TreatmentConflictModal';
 
@@ -208,18 +209,6 @@ export default function PlotDetail() {
   const [conflictModalData, setConflictModalData] = useState<{ isOpen: boolean; message: string; action: string; conflictingAction: string; conflictingDate: string } | null>(null);
   const [editingPlanter, setEditingPlanter] = useState<any>(null);
   const [newPlanterData, setNewPlanterData] = useState({ name: 'New Bed', type: 'Raised Bed', w: 4, h: 2, color: '#4CAF50' });
-  const [editPlotData, setEditPlotData] = useState({ 
-    name: '', 
-    description: '', 
-    status: 'Active' as 'Active' | 'Inactive',
-    currentCrop: '',
-    plantingDate: '',
-    startDate: '',
-    endDate: '',
-    soilType: '',
-    healthStatus: 'Stable' as any,
-    wateringFreq: ''
-  });
   const [newLog, setNewLog] = useState({ action: '', notes: '' });
   const [newTask, setNewTask] = useState('');
   const [quickTips, setQuickTips] = useState<string>('');
@@ -269,18 +258,6 @@ export default function PlotDetail() {
       if (docSnap.exists()) {
         const data = docSnap.data() as SpatialPlot;
         setPlot({ id: docSnap.id, ...data });
-        setEditPlotData({ 
-          name: data.name, 
-          description: data.description || '', 
-          status: data.status as any,
-          currentCrop: '', // No longer in SpatialPlot, but keeping for form compatibility
-          plantingDate: '',
-          startDate: '',
-          endDate: '',
-          soilType: data.soilType || '',
-          healthStatus: data.healthStatus || 'Stable',
-          wateringFreq: ''
-        });
       } else {
         toast.error('Plot not found');
         navigate('/');
@@ -297,10 +274,10 @@ export default function PlotDetail() {
     const inhabitantsQ = query(collection(db, 'inhabitants'), where('plotId', '==', plotId), where('ownerUid', '==', user.uid));
     const unsubscribeInhabitants = onSnapshot(inhabitantsQ, (snapshot) => {
       const allPlotInhabitants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Inhabitant));
-      // Mapped inhabitants have a non-zero grid position (or are in a planter)
-      setInhabitants(allPlotInhabitants.filter(p => (p.gridPosition.x !== 0 || p.gridPosition.y !== 0)));
-      // Assigned but not mapped
-      const assignedNotMapped = allPlotInhabitants.filter(p => !(p.gridPosition.x !== 0 || p.gridPosition.y !== 0));
+      // Planted = status flipped to 'Planted' on drop, or sitting at a real grid position
+      setInhabitants(allPlotInhabitants.filter(isPlanted));
+      // Assigned to this plot but still waiting in the rail
+      const assignedNotMapped = allPlotInhabitants.filter(p => !isPlanted(p));
       
       setAvailableInhabitants(prev => {
         const unassigned = prev.filter(p => !p.plotId);
@@ -464,6 +441,8 @@ export default function PlotDetail() {
             await updateDoc(doc(db, 'inhabitants', inhabitant.id), {
               plotId: plotId,
               gridPosition: newPos,
+              // First real placement: Pending -> Planted
+              ...(inhabitant.status === 'Pending' ? { status: 'Planted' as const } : {}),
               updatedAt: serverTimestamp()
             });
 
@@ -485,6 +464,8 @@ export default function PlotDetail() {
             await updateDoc(doc(db, 'inhabitants', inhabitant.id), {
               plotId: plotId,
               gridPosition: { x: newX, y: newY },
+              // First real placement: Pending -> Planted
+              ...(inhabitant.status === 'Pending' ? { status: 'Planted' as const } : {}),
               updatedAt: serverTimestamp()
             });
 
@@ -517,7 +498,11 @@ export default function PlotDetail() {
     try {
       const inhabitantsInPlanter = inhabitants.filter(p => p.gridPosition.x >= planters.find(pl => pl.id === id)!.gridPosition.x && p.gridPosition.x < planters.find(pl => pl.id === id)!.gridPosition.x + planters.find(pl => pl.id === id)!.size.w && p.gridPosition.y >= planters.find(pl => pl.id === id)!.gridPosition.y && p.gridPosition.y < planters.find(pl => pl.id === id)!.gridPosition.y + planters.find(pl => pl.id === id)!.size.h);
       for (const inhabitant of inhabitantsInPlanter) {
-        await updateDoc(doc(db, 'inhabitants', inhabitant.id), { gridPosition: { x: 0, y: 0 } });
+        await updateDoc(doc(db, 'inhabitants', inhabitant.id), {
+          gridPosition: { x: 0, y: 0 },
+          // Back to the rail: Planted -> Pending
+          ...(inhabitant.status === 'Planted' ? { status: 'Pending' as const } : {}),
+        });
       }
       await deleteDoc(doc(db, 'planters', id));
       setEditingPlanter(null);
@@ -558,29 +543,21 @@ export default function PlotDetail() {
     }
   };
 
-  const handleUpdatePlot = async () => {
+  const handleUpdatePlot = async (data: PlotEditData) => {
     if (!plotId || isSaving) return;
-
-    // Basic date validation
-    if (editPlotData.startDate && editPlotData.endDate) {
-      if (new Date(editPlotData.startDate) > new Date(editPlotData.endDate)) {
-        toast.error('Start date cannot be after end date');
-        return;
-      }
-    }
 
     setIsSaving(true);
     try {
-      await updateDoc(doc(db, 'plots', plotId), editPlotData);
-      
+      await updateDoc(doc(db, 'spatial_plots', plotId), { ...data });
+
       toast.success('Plot details updated');
-      
+
       setTimeout(() => {
         setIsEditingPlot(false);
         setIsSaving(false);
       }, 500);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `plots/${plotId}`);
+      handleFirestoreError(error, OperationType.UPDATE, `spatial_plots/${plotId}`);
       setIsSaving(false);
     }
   };
@@ -601,9 +578,12 @@ export default function PlotDetail() {
       const inhabitantsQ = query(collection(db, 'inhabitants'), where('plotId', '==', plotId));
       const inhabitantsSnap = await getDocs(inhabitantsQ);
       for (const d of inhabitantsSnap.docs) {
+        const data = d.data();
         await updateDoc(doc(db, 'inhabitants', d.id), {
           plotId: null,
-          gridPosition: { x: 0, y: 0 }
+          gridPosition: { x: 0, y: 0 },
+          // Back to unassigned: Planted -> Pending
+          ...(data.status === 'Planted' ? { status: 'Pending' } : {})
         });
       }
 
@@ -922,6 +902,10 @@ export default function PlotDetail() {
                 <Info size={16} className="text-primary" />
                 <span>Family: <span className="font-black text-on-surface">{plot.plantFamily || 'Not set'}</span></span>
               </div>
+              <div className="flex items-center gap-2">
+                <Sun size={16} className="text-amber-500" />
+                <span>Sun: <span className="font-black text-on-surface">{plot.sunExposure || plot.sunlight || 'Not set'}</span></span>
+              </div>
               {plot.irrigationZone && (
                 <div className="flex items-center gap-2">
                   <Droplets size={16} className="text-blue-500" />
@@ -989,9 +973,16 @@ export default function PlotDetail() {
                 <div className="flex items-center justify-between p-3 bg-white rounded-xl border border-primary/10">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-primary/10 rounded-lg text-primary"><Leaf size={16} /></div>
-                    <span className="text-xs font-bold">Inhabitants</span>
+                    <span className="text-xs font-bold">Planted</span>
                   </div>
                   <span className="font-black text-lg">{inhabitants.length}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 bg-white rounded-xl border border-primary/10">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-amber-100 rounded-lg text-amber-600"><Leaf size={16} /></div>
+                    <span className="text-xs font-bold">Waiting to place</span>
+                  </div>
+                  <span className="font-black text-lg">{availableInhabitants.filter(i => i.plotId === plotId).length}</span>
                 </div>
                 <div className="flex items-center justify-between p-3 bg-white rounded-xl border border-primary/10">
                   <div className="flex items-center gap-3">
@@ -1561,124 +1552,20 @@ export default function PlotDetail() {
             >
               <div className="p-8 space-y-8">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-2xl font-black font-headline tracking-tight">Customize Plot</h3>
+                  <h3 className="text-2xl font-black font-headline tracking-tight">Edit Plot</h3>
                   <button onClick={() => setIsEditingPlot(false)} className="p-2 hover:bg-stone-100 rounded-full transition-colors"><X /></button>
                 </div>
 
-                <div className="space-y-6">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Plot Name</label>
-                      <input 
-                        type="text" 
-                        value={editPlotData.name}
-                        onChange={(e) => setEditPlotData({...editPlotData, name: e.target.value})}
-                        className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Status</label>
-                      <select 
-                        value={editPlotData.status}
-                        onChange={(e) => setEditPlotData({...editPlotData, status: e.target.value as any})}
-                        className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20 appearance-none"
-                      >
-                        <option>Active</option>
-                        <option>Inactive</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Current Crop</label>
-                      <input 
-                        type="text" 
-                        value={editPlotData.currentCrop}
-                        onChange={(e) => setEditPlotData({...editPlotData, currentCrop: e.target.value})}
-                        className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20"
-                        placeholder="e.g. Tomatoes"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Planting Date</label>
-                      <DatePicker
-                        selected={editPlotData.plantingDate ? new Date(editPlotData.plantingDate) : null}
-                        onChange={(date) => setEditPlotData({...editPlotData, plantingDate: date ? date.toISOString().split('T')[0] : ''})}
-                        className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20"
-                        dateFormat="yyyy-MM-dd"
-                        placeholderText="Select planting date"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Start Date</label>
-                      <DatePicker
-                        selected={editPlotData.startDate ? new Date(editPlotData.startDate) : null}
-                        onChange={(date) => setEditPlotData({...editPlotData, startDate: date ? date.toISOString().split('T')[0] : ''})}
-                        className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20"
-                        dateFormat="yyyy-MM-dd"
-                        placeholderText="Select start date"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">End Date</label>
-                      <DatePicker
-                        selected={editPlotData.endDate ? new Date(editPlotData.endDate) : null}
-                        onChange={(date) => setEditPlotData({...editPlotData, endDate: date ? date.toISOString().split('T')[0] : ''})}
-                        className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20"
-                        dateFormat="yyyy-MM-dd"
-                        placeholderText="Select end date"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Plot Health</label>
-                      <select 
-                        value={editPlotData.healthStatus}
-                        onChange={(e) => setEditPlotData({...editPlotData, healthStatus: e.target.value as any})}
-                        className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20 appearance-none"
-                      >
-                        <option value="Excellent">Excellent</option>
-                        <option value="Stable">Stable</option>
-                        <option value="Stressed">Stressed</option>
-                        <option value="Critical">Critical</option>
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Watering Frequency</label>
-                      <input 
-                        type="text" 
-                        value={editPlotData.wateringFreq}
-                        onChange={(e) => setEditPlotData({...editPlotData, wateringFreq: e.target.value})}
-                        className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20"
-                        placeholder="e.g. Every 3 days"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Description / Notes</label>
-                    <textarea 
-                      value={editPlotData.description}
-                      onChange={(e) => setEditPlotData({...editPlotData, description: e.target.value})}
-                      className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20 min-h-[100px]"
-                      placeholder="General documentation for this plot..."
-                    />
-                  </div>
-                </div>
+                {plot && (
+                  <PlotEditForm
+                    initial={plot}
+                    isSaving={isSaving}
+                    onSave={handleUpdatePlot}
+                    onCancel={() => setIsEditingPlot(false)}
+                  />
+                )}
 
                 <div className="flex gap-3">
-                  <button 
-                    onClick={handleUpdatePlot}
-                    className="flex-1 bg-primary text-white font-black py-5 rounded-2xl hover:shadow-lg transition-all flex items-center justify-center gap-3"
-                  >
-                    <Save size={20} /> Save Plot Configuration
-                  </button>
                   <button 
                     onClick={() => { setItemToDelete({ id: plotId, type: 'plot' }); setShowDeleteModal(true); }}
                     className="p-5 bg-red-50 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all shadow-sm"
