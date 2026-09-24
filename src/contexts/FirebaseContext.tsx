@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged, User, db, handleFirestoreError, OperationType } from '../firebase';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { auth, googleProvider, signInAnonymously, signInWithPopup, signOut, onAuthStateChanged, User, db, handleFirestoreError, OperationType } from '../firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 interface FirebaseContextType {
@@ -14,9 +14,24 @@ const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined
 export function FirebaseProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  // Anonymous sign-in is attempted once per page load. If the Anonymous
+  // provider isn't enabled in the Firebase console yet, this stays false
+  // and the app falls back to the Login screen as before.
+  const anonAttempted = useRef(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (!currentUser && !anonAttempted.current) {
+        // No login screen: silently create a per-device anonymous identity
+        // so every visitor gets persistent per-user storage with zero friction.
+        anonAttempted.current = true;
+        try {
+          await signInAnonymously(auth);
+          return; // onAuthStateChanged refires with the new user; finish there.
+        } catch (error) {
+          console.error('Anonymous sign-in failed (is the Anonymous provider enabled in the Firebase console?):', error);
+        }
+      }
       if (currentUser) {
         // Ensure user document exists in Firestore
         const userRef = doc(db, 'users', currentUser.uid);
