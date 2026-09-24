@@ -137,15 +137,19 @@ export default function Plots() {
     if (!plotToDelete) return;
     const id = plotToDelete;
     setIsDeletingConfirmed(true);
+    let step = 'init';
     try {
       // 1. Get planters
+      step = 'read-planters';
       const plantersQ = query(collection(db, 'planters'), where('plotId', '==', id));
       const plantersSnap = await getDocs(plantersQ);
       const planterIds = plantersSnap.docs.map(d => d.id);
-      
+
       // 2. Unassign inhabitants
+      step = 'read-inhabitants';
       const inhabitantsQ = query(collection(db, 'inhabitants'), where('plotId', '==', id));
       const inhabitantsSnap = await getDocs(inhabitantsQ);
+      step = 'update-inhabitants';
       for (const d of inhabitantsSnap.docs) {
         await updateDoc(doc(db, 'inhabitants', d.id), {
           plotId: deleteField(),
@@ -155,6 +159,7 @@ export default function Plots() {
       }
 
       // 3. Delete expenses
+      step = 'delete-expenses';
       const expensesQ = query(collection(db, 'expenses'), where('plotId', '==', id));
       const expensesSnap = await getDocs(expensesQ);
       for (const d of expensesSnap.docs) {
@@ -162,6 +167,7 @@ export default function Plots() {
       }
 
       // 4. Delete event logs
+      step = 'delete-event-logs';
       const logsQ = query(collection(db, 'event_logs'), where('targetId', '==', id));
       const logsSnap = await getDocs(logsQ);
       for (const d of logsSnap.docs) {
@@ -169,6 +175,7 @@ export default function Plots() {
       }
 
       // 5. Delete tasks
+      step = 'delete-tasks';
       const tasksQ = query(collection(db, 'tasks'), where('plotId', '==', id));
       const tasksSnap = await getDocs(tasksQ);
       for (const d of tasksSnap.docs) {
@@ -176,6 +183,7 @@ export default function Plots() {
       }
 
       // 6. Delete calendar events (if they have plotId)
+      step = 'delete-events';
       const eventsQ = query(collection(db, 'calendar_events'), where('plotId', '==', id));
       const eventsSnap = await getDocs(eventsQ);
       for (const d of eventsSnap.docs) {
@@ -183,18 +191,23 @@ export default function Plots() {
       }
 
       // 7. Delete planters in batch
+      step = 'delete-planters';
       if (planterIds.length > 0) {
         await batchDelete('planters', planterIds);
       }
 
       // 8. Delete plot
+      step = 'delete-plot';
       await deleteDoc(doc(db, 'spatial_plots', id));
-      
+
       toast.success('Plot and all associated data deleted');
       setPlotToDelete(null);
       setShowDeleteModal(false);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `spatial_plots/${id}`);
+      const msg = error instanceof Error ? error.message : String(error);
+      // Surface the failure visibly: silent deletes are how this bug hid.
+      toast.error(`Delete failed at ${step}: ${msg}`, { duration: 10000 });
+      handleFirestoreError(error, OperationType.DELETE, `spatial_plots/${id}@${step}`);
     } finally {
       setIsDeletingConfirmed(false);
     }
