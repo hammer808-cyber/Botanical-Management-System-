@@ -221,8 +221,6 @@ export default function PlotDetail() {
   const GRID_PAD = 24; // breathing room beyond the plot borders (each side)
   const baseCell = wrapWidth > 0 ? Math.max(8, Math.floor((wrapWidth - GRID_PAD * 2) / COLS)) : 24;
   const cell = baseCell * zoom;
-  // Tracks a real drag so the tap that ends it doesn't also select the bed
-  const dragHappenedRef = useRef(false);
 
   const [isAddingPlanter, setIsAddingPlanter] = useState(false);
   const [isEditingPlot, setIsEditingPlot] = useState(false);
@@ -344,7 +342,6 @@ export default function PlotDetail() {
 
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event;
-    dragHappenedRef.current = true;
     setActiveId(active.id as string);
     setActiveType(active.data.current?.type);
   };
@@ -1158,11 +1155,7 @@ export default function PlotDetail() {
 
             <div
               ref={gridWrapRef}
-              onClick={() => {
-                // A tap that ends a drag shouldn't toggle selection state
-                dragHappenedRef.current = false;
-                setSelectedPlanterId(null);
-              }}
+              onClick={() => setSelectedPlanterId(null)}
               className="relative overflow-auto bg-stone-100 rounded-[2.5rem] border-4 border-stone-200 shadow-inner min-h-[420px] p-6 custom-scrollbar"
             >
               <div
@@ -1183,10 +1176,7 @@ export default function PlotDetail() {
                     onEdit={() => setEditingPlanter(planter)}
                     onTap={() => {
                       // A tap that ends a drag shouldn't also select the bed
-                      if (dragHappenedRef.current) {
-                        dragHappenedRef.current = false;
-                        return;
-                      }
+                      if (suppressClickRef.current) return;
                       setSelectedPlanterId(prev => prev === planter.id ? null : planter.id);
                     }}
                     inhabitants={inhabitants.filter(p => p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w && p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h)}
