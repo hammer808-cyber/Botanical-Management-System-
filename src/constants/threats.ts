@@ -67,6 +67,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   // ---------------- PESTS ----------------
   {
     id: 'hornworm',
+    image: '/threats/hornworm.jpg',
+    credit: 'The Homestead Post',
     name: 'Tomato Hornworm',
     type: 'pest',
     icon: '🐛',
@@ -80,6 +82,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'aphids',
+    image: '/threats/aphids.jpg',
+    credit: 'Vecteezy',
     name: 'Aphids',
     type: 'pest',
     icon: '🐜',
@@ -93,6 +97,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'flea-beetle',
+    image: '/threats/flea-beetle.jpg',
+    credit: 'University of Minnesota Extension',
     name: 'Flea Beetles',
     type: 'pest',
     icon: '🦗',
@@ -106,6 +112,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'colorado-potato-beetle',
+    image: '/threats/colorado-potato-beetle.webp',
+    credit: 'Penn State Extension',
     name: 'Colorado Potato Beetle',
     type: 'pest',
     icon: '🪲',
@@ -119,6 +127,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'cabbage-worm',
+    image: '/threats/cabbage-worm.jpg',
+    credit: 'PositiveBloom',
     name: 'Cabbage Worms',
     type: 'pest',
     icon: '🐛',
@@ -132,6 +142,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'cucumber-beetle',
+    image: '/threats/cucumber-beetle.webp',
+    credit: 'Growfully',
     name: 'Cucumber Beetles',
     type: 'pest',
     icon: '🪲',
@@ -145,6 +157,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'squash-vine-borer',
+    image: '/threats/squash-vine-borer.jpg',
+    credit: 'Pinterest',
     name: 'Squash Vine Borer',
     type: 'pest',
     icon: '🐛',
@@ -158,6 +172,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'corn-earworm',
+    image: '/threats/corn-earworm.jpg',
+    credit: 'University of Maryland Extension',
     name: 'Corn Earworm',
     type: 'pest',
     icon: '🌽',
@@ -171,6 +187,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'mexican-bean-beetle',
+    image: '/threats/mexican-bean-beetle.jpg',
+    credit: 'Crop Protection Network',
     name: 'Mexican Bean Beetle',
     type: 'pest',
     icon: '🪲',
@@ -184,6 +202,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'carrot-rust-fly',
+    image: '/threats/carrot-rust-fly.webp',
+    credit: 'Garden UK',
     name: 'Carrot Rust Fly',
     type: 'pest',
     icon: '🪰',
@@ -197,6 +217,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'onion-thrips',
+    image: '/threats/onion-thrips.jpg',
+    credit: 'Viaverda',
     name: 'Onion Thrips',
     type: 'pest',
     icon: '🦟',
@@ -210,6 +232,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'slugs-snails',
+    image: '/threats/slugs-snails.jpg',
+    credit: 'Glorious Garden',
     name: 'Slugs & Snails',
     type: 'pest',
     icon: '🐌',
@@ -223,6 +247,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'spider-mites',
+    image: '/threats/spider-mites.webp',
+    credit: 'Urbane Eight',
     name: 'Spider Mites',
     type: 'pest',
     icon: '🕷️',
@@ -236,6 +262,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'whiteflies',
+    image: '/threats/whiteflies.webp',
+    credit: 'This Is My Garden',
     name: 'Whiteflies',
     type: 'pest',
     icon: '🦟',
@@ -250,6 +278,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   // ---------------- FLOWER PESTS ----------------
   {
     id: 'flower-thrips',
+    image: '/threats/flower-thrips.webp',
+    credit: 'Agri Farming',
     name: 'Flower Thrips',
     type: 'pest',
     icon: '🦟',
@@ -263,6 +293,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'japanese-beetle',
+    image: '/threats/japanese-beetle.webp',
+    credit: 'La Vie des Reines',
     name: 'Japanese Beetles',
     type: 'pest',
     icon: '🪲',
@@ -276,6 +308,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'leafhopper',
+    image: '/threats/leafhopper.jpg',
+    credit: 'AllUneedPest',
     name: 'Leafhoppers',
     type: 'pest',
     icon: '🦗',
@@ -289,6 +323,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'earwig',
+    image: '/threats/earwig.jpg',
+    credit: 'ArtDatabanken',
     name: 'Earwigs',
     type: 'pest',
     icon: '🌙',
@@ -302,6 +338,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'budworm',
+    image: '/threats/budworm.jpg',
+    credit: 'Plant My Plants',
     name: 'Tobacco Budworm',
     type: 'pest',
     icon: '🐛',
@@ -316,6 +354,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   // ---------------- DISEASES ----------------
   {
     id: 'early-blight',
+    image: '/threats/early-blight.jpg',
+    credit: 'Epic Gardening',
     name: 'Early Blight',
     type: 'disease',
     icon: '🍂',
@@ -329,6 +369,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'late-blight',
+    image: '/threats/late-blight.jpg',
+    credit: 'Potatoes News',
     name: 'Late Blight',
     type: 'disease',
     icon: '🌧️',
@@ -342,6 +384,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'powdery-mildew',
+    image: '/threats/powdery-mildew.webp',
+    credit: 'Growing Organic',
     name: 'Powdery Mildew',
     type: 'disease',
     icon: '🌫️',
@@ -355,6 +399,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'downy-mildew',
+    image: '/threats/downy-mildew.jpg',
+    credit: 'Dishcuss',
     name: 'Downy Mildew',
     type: 'disease',
     icon: '💧',
@@ -368,6 +414,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'blossom-end-rot',
+    image: '/threats/blossom-end-rot.jpg',
+    credit: 'Homestead Acres',
     name: 'Blossom End Rot',
     type: 'disease',
     icon: '🍅',
@@ -381,6 +429,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'bacterial-leaf-spot',
+    image: '/threats/bacterial-leaf-spot.jpg',
+    credit: 'University of Maryland Extension',
     name: 'Bacterial Leaf Spot',
     type: 'disease',
     icon: '🦠',
@@ -394,6 +444,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'bean-rust',
+    image: '/threats/bean-rust.webp',
+    credit: 'GardenUK',
     name: 'Bean Rust',
     type: 'disease',
     icon: '🟠',
@@ -407,6 +459,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'gray-mold',
+    image: '/threats/gray-mold.jpg',
+    credit: 'Senasica',
     name: 'Gray Mold (Botrytis)',
     type: 'disease',
     icon: '🍄',
@@ -420,6 +474,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'clubroot',
+    image: '/threats/clubroot.jpg',
+    credit: 'MorningChores',
     name: 'Clubroot',
     type: 'disease',
     icon: '🌱',
@@ -433,6 +489,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'fusarium-wilt',
+    image: '/threats/fusarium-wilt.jpg',
+    credit: 'University of Maryland Extension',
     name: 'Fusarium Wilt',
     type: 'disease',
     icon: '🥀',
@@ -446,6 +504,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'damping-off',
+    image: '/threats/damping-off.jpg',
+    credit: 'Gardening.org',
     name: 'Damping Off',
     type: 'disease',
     icon: '🌱',
@@ -460,6 +520,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   // ---------------- FLOWER DISEASES ----------------
   {
     id: 'aster-yellows',
+    image: '/threats/aster-yellows.jpg',
+    credit: 'Georgia Perennial Plant Association',
     name: 'Aster Yellows',
     type: 'disease',
     icon: '🥀',
@@ -473,6 +535,8 @@ export const THREAT_LIBRARY: PlantThreat[] = [
   },
   {
     id: 'snapdragon-rust',
+    image: '/threats/snapdragon-rust.webp',
+    credit: 'EatHealthy365',
     name: 'Snapdragon Rust',
     type: 'disease',
     icon: '🟠',
