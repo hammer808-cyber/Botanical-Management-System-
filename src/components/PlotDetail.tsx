@@ -21,6 +21,7 @@ import {
   Box, 
   Plus, 
   Trash2, 
+  RotateCw,
   Settings2, 
   Maximize2, 
   Minimize2, 
@@ -92,9 +93,6 @@ import {
 import { getThreatsForPlant, type PlantThreat } from '../constants/threats';
 import PlantHealthDrawer from './PlantHealthDrawer';
 import ThreatCard from './ThreatCard';
-
-const GRID_SIZE = 30; // 30x20
-const CELL_SIZE = 24; // pixels
 
 const GARDEN_JOKES = [
   "Why did the tomato turn red? Because it saw the salad dressing!",
@@ -200,6 +198,31 @@ export default function PlotDetail() {
   const [activeType, setActiveType] = useState<'planter' | 'plant' | null>(null);
   const [zoom, setZoom] = useState(1);
   const [activeLayer, setActiveLayer] = useState<'none' | 'family' | 'irrigation'>('none');
+  const [selectedPlanterId, setSelectedPlanterId] = useState<string | null>(null);
+
+  // Predetermined plot grid: each plot carries its own dimensions from the
+  // bed-build quiz (gridConfig). Legacy plots fall back to the old 30x20.
+  const COLS = plot?.gridConfig?.cols || 30;
+  const ROWS = plot?.gridConfig?.rows || 20;
+
+  // Fit the grid to the phone screen: measure the scroll container and size
+  // cells so the whole plot outline fits the available width. Zoom scales up.
+  const gridWrapRef = useRef<HTMLDivElement>(null);
+  const [wrapWidth, setWrapWidth] = useState(0);
+  useEffect(() => {
+    const el = gridWrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      setWrapWidth(entries[0].contentRect.width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const GRID_PAD = 24; // breathing room beyond the plot borders (each side)
+  const baseCell = wrapWidth > 0 ? Math.max(8, Math.floor((wrapWidth - GRID_PAD * 2) / COLS)) : 24;
+  const cell = baseCell * zoom;
+  // Tracks a real drag so the tap that ends it doesn't also select the bed
+  const dragHappenedRef = useRef(false);
 
   const [isAddingPlanter, setIsAddingPlanter] = useState(false);
   const [isEditingPlot, setIsEditingPlot] = useState(false);
@@ -321,6 +344,7 @@ export default function PlotDetail() {
 
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event;
+    dragHappenedRef.current = true;
     setActiveId(active.id as string);
     setActiveType(active.data.current?.type);
   };
@@ -413,14 +437,15 @@ export default function PlotDetail() {
       }
     };
 
-    const xDiff = Math.round(delta.x / (CELL_SIZE * zoom));
-    const yDiff = Math.round(delta.y / (CELL_SIZE * zoom));
+    const xDiff = Math.round(delta.x / cell);
+    const yDiff = Math.round(delta.y / cell);
 
     if (active.data.current?.type === 'planter') {
       const planter = planters.find(p => p.id === active.id);
       if (planter) {
-        const newX = Math.max(0, Math.min(GRID_SIZE - planter.size.w, planter.gridPosition.x + xDiff));
-        const newY = Math.max(0, Math.min(20 - planter.size.h, planter.gridPosition.y + yDiff));
+        // Beds stay inside the plot outline
+        const newX = Math.max(0, Math.min(COLS - planter.size.w, planter.gridPosition.x + xDiff));
+        const newY = Math.max(0, Math.min(ROWS - planter.size.h, planter.gridPosition.y + yDiff));
         
         try {
           await updateDoc(doc(db, 'planters', planter.id), {
@@ -457,8 +482,8 @@ export default function PlotDetail() {
             handleFirestoreError(error, OperationType.UPDATE, `inhabitants/${inhabitant.id}`);
           }
         } else {
-          const newX = Math.max(0, Math.min(GRID_SIZE - 1, (inhabitant.gridPosition?.x || 0) + xDiff));
-          const newY = Math.max(0, Math.min(20 - 1, (inhabitant.gridPosition?.y || 0) + yDiff));
+          const newX = Math.max(0, Math.min(COLS - 1, (inhabitant.gridPosition?.x || 0) + xDiff));
+          const newY = Math.max(0, Math.min(ROWS - 1, (inhabitant.gridPosition?.y || 0) + yDiff));
           
           try {
             await updateDoc(doc(db, 'inhabitants', inhabitant.id), {
@@ -513,6 +538,34 @@ export default function PlotDetail() {
       handleFirestoreError(error, OperationType.DELETE, `planters/${id}`);
     } finally {
       setIsDeletingConfirmed(false);
+    }
+  };
+
+  const rotatePlanter = async (id: string) => {
+    const planter = planters.find(p => p.id === id);
+    if (!planter) return;
+    // 90-degree rotation: swap width and height, then pull back inside the plot
+    const newSize = { w: planter.size.h, h: planter.size.w };
+    const newX = Math.max(0, Math.min(COLS - newSize.w, planter.gridPosition.x));
+    const newY = Math.max(0, Math.min(ROWS - newSize.h, planter.gridPosition.y));
+    try {
+      await updateDoc(doc(db, 'planters', id), {
+        size: newSize,
+        gridPosition: { x: newX, y: newY }
+      });
+      // Plants riding in the bed keep riding: move them to the bed's new origin
+      const riders = inhabitants.filter(p =>
+        p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w &&
+        p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h
+      );
+      for (const r of riders) {
+        await updateDoc(doc(db, 'inhabitants', r.id), {
+          gridPosition: { x: newX, y: newY }
+        });
+      }
+      toast.success('Bed rotated');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `planters/${id}`);
     }
   };
 
@@ -859,6 +912,93 @@ export default function PlotDetail() {
 
   return (
     <div className="space-y-6 px-6 pb-20">
+      {/* Bed info sheet: tap a bed on the map for its details */}
+      <AnimatePresence>
+        {selectedPlanterId && (() => {
+          const planter = planters.find(p => p.id === selectedPlanterId);
+          if (!planter) return null;
+          const bedPlants = inhabitants.filter(p =>
+            p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w &&
+            p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h
+          );
+          return (
+            <motion.div
+              key="bed-sheet"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[105] flex items-end justify-center sm:items-center p-4"
+              onClick={() => setSelectedPlanterId(null)}
+            >
+              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+              <motion.div
+                initial={{ y: 80, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 80, opacity: 0 }}
+                transition={{ type: 'spring', damping: 28, stiffness: 320 }}
+                onClick={(e) => e.stopPropagation()}
+                className="relative w-full max-w-md bg-white rounded-[2rem] shadow-2xl p-6 space-y-5"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl shadow-inner" style={{ backgroundColor: planter.color }} />
+                    <div>
+                      <h3 className="font-black text-xl tracking-tight">{planter.name}</h3>
+                      <p className="text-xs font-bold text-on-surface-variant">
+                        {planter.size.w} × {planter.size.h} cells • {bedPlants.length} plant{bedPlants.length === 1 ? '' : 's'}
+                      </p>
+                    </div>
+                  </div>
+                  <button onClick={() => setSelectedPlanterId(null)} className="p-2 hover:bg-stone-100 rounded-full text-on-surface-variant">
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {bedPlants.length > 0 && (
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {bedPlants.map(p => (
+                      <div key={p.id} className="flex flex-col items-center gap-1 shrink-0 w-14">
+                        <div className="w-12 h-12 rounded-full bg-primary/10 border border-primary/20 overflow-hidden flex items-center justify-center">
+                          {p.image ? (
+                            <img src={p.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            <Leaf size={18} className="text-primary" />
+                          )}
+                        </div>
+                        <span className="text-[9px] font-bold text-center leading-tight line-clamp-2">{p.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 gap-3">
+                  <button
+                    onClick={() => rotatePlanter(planter.id)}
+                    className="flex flex-col items-center gap-1 py-3 rounded-2xl bg-primary/10 text-primary font-black text-xs hover:bg-primary/20 transition-colors"
+                  >
+                    <RotateCw size={20} />
+                    Rotate
+                  </button>
+                  <button
+                    onClick={() => { setSelectedPlanterId(null); setEditingPlanter(planter); }}
+                    className="flex flex-col items-center gap-1 py-3 rounded-2xl bg-stone-100 text-on-surface font-black text-xs hover:bg-stone-200 transition-colors"
+                  >
+                    <Settings2 size={20} />
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => { setSelectedPlanterId(null); setItemToDelete({ id: planter.id, type: 'planter' }); setShowDeleteModal(true); }}
+                    className="flex flex-col items-center gap-1 py-3 rounded-2xl bg-red-50 text-red-500 font-black text-xs hover:bg-red-100 transition-colors"
+                  >
+                    <Trash2 size={20} />
+                    Delete
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
       {/* Plot Header & Metadata */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-surface-container-low p-8 rounded-[2.5rem] border border-outline-variant/10 shadow-sm">
         <div className="flex items-center gap-6">
@@ -965,6 +1105,146 @@ export default function PlotDetail() {
 
       <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Main Grid Editor */}
+          <div className="lg:col-span-3 space-y-4">
+            {/* Plant rail — quiz picks land here, drag them onto the bed */}
+            <div className="bg-white p-4 rounded-3xl border border-outline-variant/10 shadow-sm">
+              <div className="flex items-center justify-between mb-3 px-2">
+                <h4 className="text-xs font-black uppercase tracking-[0.2em] text-on-surface-variant">
+                  Your plants <span className="text-primary">— drag onto the bed</span>
+                </h4>
+                <span className="text-[10px] font-bold text-on-surface-variant">
+                  {availableInhabitants.length} to place
+                </span>
+              </div>
+              {availableInhabitants.length === 0 ? (
+                <p className="text-xs text-on-surface-variant italic px-2 py-3 text-center">
+                  All plants are placed. Pick more with the bed quiz or add them from the Library.
+                </p>
+              ) : (
+                <div className="flex gap-3 overflow-x-auto pb-2 pt-1 px-1 snap-x custom-scrollbar">
+                  {availableInhabitants.map(inhabitant => (
+                    <DraggablePlantIcon key={inhabitant.id} inhabitant={inhabitant} compact />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between bg-white p-4 rounded-3xl border border-outline-variant/10 shadow-sm">
+              <div className="flex items-center gap-2">
+                <Filter size={16} className="text-primary" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Spatial Layers</span>
+              </div>
+              <div className="flex gap-2">
+                {[
+                  { id: 'none', label: 'Default', icon: MapIcon },
+                  { id: 'family', label: 'Family', icon: Tag },
+                  { id: 'irrigation', label: 'Irrigation', icon: Droplets }
+                ].map(layer => (
+                  <button
+                    key={layer.id}
+                    onClick={() => setActiveLayer(layer.id as any)}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                      activeLayer === layer.id ? "bg-primary text-white shadow-lg" : "bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high"
+                    )}
+                  >
+                    <layer.icon size={12} />
+                    {layer.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div
+              ref={gridWrapRef}
+              onClick={() => {
+                // A tap that ends a drag shouldn't toggle selection state
+                dragHappenedRef.current = false;
+                setSelectedPlanterId(null);
+              }}
+              className="relative overflow-auto bg-stone-100 rounded-[2.5rem] border-4 border-stone-200 shadow-inner min-h-[420px] p-6 custom-scrollbar"
+            >
+              <div
+                className="relative bg-white shadow-2xl mx-auto rounded-lg border-4 border-primary/60"
+                style={{
+                  width: COLS * cell,
+                  height: ROWS * cell,
+                  backgroundImage: `linear-gradient(to right, #e7e5e4 1px, transparent 1px), linear-gradient(to bottom, #e7e5e4 1px, transparent 1px)`,
+                  backgroundSize: `${cell}px ${cell}px`
+                }}
+              >
+                {planters.map(planter => (
+                  <PlanterItem
+                    key={planter.id}
+                    planter={planter}
+                    cell={cell}
+                    selected={selectedPlanterId === planter.id}
+                    onEdit={() => setEditingPlanter(planter)}
+                    onTap={() => {
+                      // A tap that ends a drag shouldn't also select the bed
+                      if (dragHappenedRef.current) {
+                        dragHappenedRef.current = false;
+                        return;
+                      }
+                      setSelectedPlanterId(prev => prev === planter.id ? null : planter.id);
+                    }}
+                    inhabitants={inhabitants.filter(p => p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w && p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h)}
+                    activeLayer={activeLayer}
+                  />
+                ))}
+
+                {inhabitants.filter(p => !planters.some(pl => p.gridPosition.x >= pl.gridPosition.x && p.gridPosition.x < pl.gridPosition.x + pl.size.w && p.gridPosition.y >= pl.gridPosition.y && p.gridPosition.y < pl.gridPosition.y + pl.size.h)).map(inhabitant => (
+                  <DraggableItem
+                    key={inhabitant.id}
+                    id={inhabitant.id}
+                    type="plant"
+                    position={inhabitant.gridPosition}
+                    size={{ w: 1, h: 1 }}
+                    cell={cell}
+                    image={inhabitant.image}
+                    name={inhabitant.name}
+                    activeLayer={activeLayer}
+                    inhabitant={inhabitant}
+                    hasConflict={conflictMap.has(inhabitant.id)}
+                    onSelect={handleSelectPlant}
+                  />
+                ))}
+
+                {/* Suitability Heatmap Overlay during Drag */}
+                {activeId && activeType === 'plant' && plot && (
+                  <SuitabilityOverlay
+                    activePlant={[...inhabitants, ...availableInhabitants].find(p => p.id === activeId) || {}}
+                    plot={plot}
+                    inhabitants={inhabitants}
+                    cell={cell}
+                    cols={COLS}
+                    rows={ROWS}
+                  />
+                )}
+              </div>
+
+              <DragOverlay dropAnimation={null}>
+                {activeId ? (
+                  <div
+                    className={cn(
+                      "rounded-lg shadow-2xl flex items-center justify-center border-2 border-primary ring-4 ring-primary/20",
+                      activeType === 'planter' ? "bg-primary/20" : "bg-white"
+                    )}
+                    style={{
+                      width: (activeType === 'planter' ? planters.find(p => p.id === activeId)?.size.w || 1 : 1) * cell,
+                      height: (activeType === 'planter' ? planters.find(p => p.id === activeId)?.size.h || 1 : 1) * cell,
+                    }}
+                  >
+                    {activeType === 'plant' ? <Leaf size={Math.max(12, cell * 0.66)} className="text-primary" /> : <Box size={Math.max(16, cell)} className="text-primary" />}
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </div>
+            <p className="text-[11px] font-bold text-on-surface-variant text-center">
+              Drag beds & plants to move them — they stay inside the plot outline. Tap a bed for its details.
+            </p>
+          </div>
           {/* Sidebar: Stats */}
           <div className="lg:col-span-1 space-y-6">
             <div className="bg-primary/5 p-6 rounded-[2rem] border border-primary/10">
@@ -1091,124 +1371,6 @@ export default function PlotDetail() {
             </div>
           </div>
 
-          {/* Main Grid Editor */}
-          <div className="lg:col-span-3 space-y-4">
-            {/* Plant rail — quiz picks land here, drag them onto the bed */}
-            <div className="bg-white p-4 rounded-3xl border border-outline-variant/10 shadow-sm">
-              <div className="flex items-center justify-between mb-3 px-2">
-                <h4 className="text-xs font-black uppercase tracking-[0.2em] text-on-surface-variant">
-                  Your plants <span className="text-primary">— drag onto the bed</span>
-                </h4>
-                <span className="text-[10px] font-bold text-on-surface-variant">
-                  {availableInhabitants.length} to place
-                </span>
-              </div>
-              {availableInhabitants.length === 0 ? (
-                <p className="text-xs text-on-surface-variant italic px-2 py-3 text-center">
-                  All plants are placed. Pick more with the bed quiz or add them from the Library.
-                </p>
-              ) : (
-                <div className="flex gap-3 overflow-x-auto pb-2 pt-1 px-1 snap-x custom-scrollbar">
-                  {availableInhabitants.map(inhabitant => (
-                    <DraggablePlantIcon key={inhabitant.id} inhabitant={inhabitant} compact />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between bg-white p-4 rounded-3xl border border-outline-variant/10 shadow-sm">
-              <div className="flex items-center gap-2">
-                <Filter size={16} className="text-primary" />
-                <span className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Spatial Layers</span>
-              </div>
-              <div className="flex gap-2">
-                {[
-                  { id: 'none', label: 'Default', icon: MapIcon },
-                  { id: 'family', label: 'Family', icon: Tag },
-                  { id: 'irrigation', label: 'Irrigation', icon: Droplets }
-                ].map(layer => (
-                  <button
-                    key={layer.id}
-                    onClick={() => setActiveLayer(layer.id as any)}
-                    className={cn(
-                      "flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                      activeLayer === layer.id ? "bg-primary text-white shadow-lg" : "bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high"
-                    )}
-                  >
-                    <layer.icon size={12} />
-                    {layer.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="relative overflow-auto bg-stone-100 rounded-[2.5rem] border-4 border-stone-200 shadow-inner min-h-[600px] p-8 custom-scrollbar">
-              <div 
-                className="relative bg-white shadow-2xl mx-auto"
-                style={{ 
-                  width: GRID_SIZE * CELL_SIZE * zoom, 
-                  height: 20 * CELL_SIZE * zoom,
-                  backgroundImage: `linear-gradient(to right, #f0f0f0 1px, transparent 1px), linear-gradient(to bottom, #f0f0f0 1px, transparent 1px)`,
-                  backgroundSize: `${CELL_SIZE * zoom}px ${CELL_SIZE * zoom}px`
-                }}
-              >
-                {planters.map(planter => (
-                  <PlanterItem 
-                    key={planter.id} 
-                    planter={planter}
-                    zoom={zoom}
-                    onEdit={() => setEditingPlanter(planter)}
-                    inhabitants={inhabitants.filter(p => p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w && p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h)}
-                    activeLayer={activeLayer}
-                  />
-                ))}
-
-                {inhabitants.filter(p => !planters.some(pl => p.gridPosition.x >= pl.gridPosition.x && p.gridPosition.x < pl.gridPosition.x + pl.size.w && p.gridPosition.y >= pl.gridPosition.y && p.gridPosition.y < pl.gridPosition.y + pl.size.h)).map(inhabitant => (
-                  <DraggableItem 
-                    key={inhabitant.id} 
-                    id={inhabitant.id} 
-                    type="plant"
-                    position={inhabitant.gridPosition}
-                    size={{ w: 1, h: 1 }}
-                    zoom={zoom}
-                    image={inhabitant.image}
-                    name={inhabitant.name}
-                    activeLayer={activeLayer}
-                    inhabitant={inhabitant}
-                    hasConflict={conflictMap.has(inhabitant.id)}
-                    onSelect={handleSelectPlant}
-                  />
-                ))}
-
-                {/* Suitability Heatmap Overlay during Drag */}
-                {activeId && activeType === 'plant' && plot && (
-                  <SuitabilityOverlay 
-                    activePlant={[...inhabitants, ...availableInhabitants].find(p => p.id === activeId) || {}} 
-                    plot={plot} 
-                    inhabitants={inhabitants} 
-                    zoom={zoom} 
-                  />
-                )}
-              </div>
-
-              <DragOverlay dropAnimation={null}>
-                {activeId ? (
-                  <div 
-                    className={cn(
-                      "rounded-lg shadow-2xl flex items-center justify-center border-2 border-primary ring-4 ring-primary/20",
-                      activeType === 'planter' ? "bg-primary/20" : "bg-white"
-                    )}
-                    style={{
-                      width: (activeType === 'planter' ? planters.find(p => p.id === activeId)?.size.w || 1 : 1) * CELL_SIZE * zoom,
-                      height: (activeType === 'planter' ? planters.find(p => p.id === activeId)?.size.h || 1 : 1) * CELL_SIZE * zoom,
-                    }}
-                  >
-                    {activeType === 'plant' ? <Leaf size={16 * zoom} className="text-primary" /> : <Box size={24 * zoom} className="text-primary" />}
-                  </div>
-                ) : null}
-              </DragOverlay>
-            </div>
-          </div>
         </div>
       </DndContext>
 
@@ -1716,11 +1878,11 @@ export default function PlotDetail() {
                       <input 
                         type="number" 
                         min="1"
-                        max={GRID_SIZE - editingPlanter.gridPosition.x}
+                        max={COLS - editingPlanter.gridPosition.x}
                         value={editingPlanter.size.w}
                         onChange={(e) => {
                           const val = parseInt(e.target.value) || 1;
-                          const maxW = GRID_SIZE - editingPlanter.gridPosition.x;
+                          const maxW = COLS - editingPlanter.gridPosition.x;
                           setEditingPlanter({...editingPlanter, size: { ...editingPlanter.size, w: Math.min(Math.max(1, val), maxW) }});
                         }}
                         className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20"
@@ -1731,11 +1893,11 @@ export default function PlotDetail() {
                       <input 
                         type="number" 
                         min="1"
-                        max={20 - editingPlanter.gridPosition.y}
+                        max={ROWS - editingPlanter.gridPosition.y}
                         value={editingPlanter.size.h}
                         onChange={(e) => {
                           const val = parseInt(e.target.value) || 1;
-                          const maxH = 20 - editingPlanter.gridPosition.y;
+                          const maxH = ROWS - editingPlanter.gridPosition.y;
                           setEditingPlanter({...editingPlanter, size: { ...editingPlanter.size, h: Math.min(Math.max(1, val), maxH) }});
                         }}
                         className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20"
@@ -2012,12 +2174,10 @@ function DraggablePlantIcon({ inhabitant, compact = false }: { inhabitant: Inhab
   );
 }
 
-function SuitabilityOverlay({ activePlant, plot, inhabitants, zoom }: { activePlant: Partial<Inhabitant>, plot: SpatialPlot, inhabitants: Inhabitant[], zoom: number }) {
-  // We only render a subset of cells or a lower resolution for performance if needed, 
-  // but 30x20 is small enough for a simple map.
+function SuitabilityOverlay({ activePlant, plot, inhabitants, cell, cols, rows }: { activePlant: Partial<Inhabitant>, plot: SpatialPlot, inhabitants: Inhabitant[], cell: number, cols: number, rows: number }) {
   const cells = [];
-  for (let y = 0; y < 20; y++) {
-    for (let x = 0; x < GRID_SIZE; x++) {
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
       const score = calculateSuitabilityScore(x, y, activePlant, plot, inhabitants);
       cells.push({ x, y, score });
     }
@@ -2025,19 +2185,19 @@ function SuitabilityOverlay({ activePlant, plot, inhabitants, zoom }: { activePl
 
   return (
     <div className="absolute inset-0 pointer-events-none z-40">
-      {cells.map(cell => (
+      {cells.map(c => (
         <div
-          key={`${cell.x}-${cell.y}`}
+          key={`${c.x}-${c.y}`}
           className="absolute border border-white/5 transition-colors duration-300"
           style={{
-            left: cell.x * CELL_SIZE * zoom,
-            top: cell.y * CELL_SIZE * zoom,
-            width: CELL_SIZE * zoom,
-            height: CELL_SIZE * zoom,
-            backgroundColor: cell.score > 70 ? 'rgba(34, 197, 94, 0.3)' : cell.score > 40 ? 'rgba(234, 179, 8, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+            left: c.x * cell,
+            top: c.y * cell,
+            width: cell,
+            height: cell,
+            backgroundColor: c.score > 70 ? 'rgba(34, 197, 94, 0.3)' : c.score > 40 ? 'rgba(234, 179, 8, 0.2)' : 'rgba(239, 68, 68, 0.2)',
           }}
         >
-          {cell.score > 80 && (
+          {c.score > 80 && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="w-1 h-1 bg-white rounded-full animate-ping" />
             </div>
@@ -2048,7 +2208,7 @@ function SuitabilityOverlay({ activePlant, plot, inhabitants, zoom }: { activePl
   );
 }
 
-function PlanterItem({ planter, zoom, onEdit, inhabitants, activeLayer }: { planter: Planter, zoom: number, onEdit: () => void, inhabitants: Inhabitant[], activeLayer: string }) {
+function PlanterItem({ planter, cell, onEdit, onTap, selected, inhabitants, activeLayer }: { planter: Planter, cell: number, onEdit: () => void, onTap: () => void, selected: boolean, inhabitants: Inhabitant[], activeLayer: string }) {
   const { setNodeRef, isOver } = useDroppable({
     id: planter.id,
     data: { type: 'planter' }
@@ -2062,11 +2222,11 @@ function PlanterItem({ planter, zoom, onEdit, inhabitants, activeLayer }: { plan
   const style = {
     transform: CSS.Translate.toString(transform),
     position: 'absolute' as const,
-    left: planter.gridPosition.x * CELL_SIZE * zoom,
-    top: planter.gridPosition.y * CELL_SIZE * zoom,
-    width: planter.size.w * CELL_SIZE * zoom,
-    height: planter.size.h * CELL_SIZE * zoom,
-    zIndex: 10,
+    left: planter.gridPosition.x * cell,
+    top: planter.gridPosition.y * cell,
+    width: planter.size.w * cell,
+    height: planter.size.h * cell,
+    zIndex: selected ? 15 : 10,
     opacity: isDragging ? 0.3 : 1,
   };
 
@@ -2083,8 +2243,13 @@ function PlanterItem({ planter, zoom, onEdit, inhabitants, activeLayer }: { plan
         setDragRef(node);
       }}
       style={style} 
+      onClick={(e) => {
+        e.stopPropagation();
+        onTap();
+      }}
       className={cn(
         "group rounded-lg border-2 transition-all relative shadow-sm",
+        selected ? "border-primary ring-4 ring-primary/30" :
         isOver ? "border-primary ring-4 ring-primary/20 scale-[1.02]" : "border-stone-400",
         "cursor-grab active:cursor-grabbing"
       )}
@@ -2118,7 +2283,7 @@ function PlanterItem({ planter, zoom, onEdit, inhabitants, activeLayer }: { plan
               {inhabitant.image ? (
                 <img src={inhabitant.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
               ) : (
-                <Leaf size={8 * zoom} className="text-primary" />
+                <Leaf size={Math.max(6, cell / 3)} className="text-primary" />
               )}
             </div>
           ))}
@@ -2128,7 +2293,7 @@ function PlanterItem({ planter, zoom, onEdit, inhabitants, activeLayer }: { plan
   );
 }
 
-function DraggableItem({ id, type, position, size, zoom, image, name, activeLayer, inhabitant, hasConflict, onSelect }: { id: string, type: string, position: { x: number, y: number }, size: { w: number, h: number }, zoom: number, image?: string, name: string, activeLayer: string, inhabitant?: Inhabitant, hasConflict?: boolean, onSelect?: (inhabitant: Inhabitant) => void }) {
+function DraggableItem({ id, type, position, size, cell, image, name, activeLayer, inhabitant, hasConflict, onSelect }: { id: string, type: string, position: { x: number, y: number }, size: { w: number, h: number }, cell: number, image?: string, name: string, activeLayer: string, inhabitant?: Inhabitant, hasConflict?: boolean, onSelect?: (inhabitant: Inhabitant) => void }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: id,
     data: { type: type }
@@ -2137,10 +2302,10 @@ function DraggableItem({ id, type, position, size, zoom, image, name, activeLaye
   const style = {
     transform: transform ? CSS.Translate.toString(transform) : undefined,
     position: 'absolute' as const,
-    left: position.x * CELL_SIZE * zoom,
-    top: position.y * CELL_SIZE * zoom,
-    width: size.w * CELL_SIZE * zoom,
-    height: size.h * CELL_SIZE * zoom,
+    left: position.x * cell,
+    top: position.y * cell,
+    width: size.w * cell,
+    height: size.h * cell,
     zIndex: 30,
     opacity: isDragging ? 0.3 : 1,
   };
@@ -2182,11 +2347,11 @@ function DraggableItem({ id, type, position, size, zoom, image, name, activeLaye
       {image ? (
         <img src={image} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
       ) : (
-        <Leaf size={16 * zoom} className="text-primary" />
+        <Leaf size={Math.max(10, cell * 0.66)} className="text-primary" />
       )}
       {hasConflict && (
         <div className="absolute -top-1 -right-1 bg-amber-400 rounded-full p-0.5 shadow-md border border-white" title="Companion conflict — check alerts">
-          <AlertTriangle size={10 * zoom} className="text-amber-900" />
+          <AlertTriangle size={Math.max(8, cell * 0.4)} className="text-amber-900" />
         </div>
       )}
       <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-stone-800 text-white text-[8px] px-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
