@@ -1225,7 +1225,13 @@ export default function PlotDetail() {
       <PlantHealthDrawer
         plant={selectedPlant}
         onClose={() => setSelectedPlant(null)}
-        onLogTreatment={() => {
+        onLogTreatment={(threat) => {
+          if (selectedPlant) {
+            setNewLog({
+              action: 'Pest Control',
+              notes: `${selectedPlant.name} — ${threat.name}: ${threat.quickFix.join(' / ')}`,
+            });
+          }
           setSelectedPlant(null);
           setIsAddingLog(true);
         }}
