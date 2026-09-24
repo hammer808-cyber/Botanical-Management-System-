@@ -208,6 +208,7 @@ export default function PlotDetail() {
   // Fit the grid to the phone screen: measure the scroll container and size
   // cells so the whole plot outline fits the available width. Zoom scales up.
   const gridWrapRef = useRef<HTMLDivElement>(null);
+  const gridInnerRef = useRef<HTMLDivElement>(null);
   const [wrapWidth, setWrapWidth] = useState(0);
   useEffect(() => {
     const el = gridWrapRef.current;
@@ -401,6 +402,28 @@ export default function PlotDetail() {
       .slice(0, 5);
   }, [inhabitants]);
 
+  // Where inside a bed did the pointer land? Converts the dragged node's
+  // translated rect into a grid cell, clamped to the bed's footprint.
+  // Falls back to the bed's top-left corner when the rect is unavailable.
+  const dropCellInPlanter = (activeRect: { left: number; top: number; width: number; height: number } | null | undefined, planter: Planter) => {
+    const fallback = { ...planter.gridPosition };
+    try {
+      const gridEl = gridInnerRef.current;
+      if (!activeRect || !gridEl) return fallback;
+      const box = gridEl.getBoundingClientRect();
+      const cx = activeRect.left + activeRect.width / 2 - box.left;
+      const cy = activeRect.top + activeRect.height / 2 - box.top;
+      const gx = Math.round(cx / cell - 0.5);
+      const gy = Math.round(cy / cell - 0.5);
+      return {
+        x: Math.max(planter.gridPosition.x, Math.min(planter.gridPosition.x + planter.size.w - 1, gx)),
+        y: Math.max(planter.gridPosition.y, Math.min(planter.gridPosition.y + planter.size.h - 1, gy)),
+      };
+    } catch {
+      return fallback;
+    }
+  };
+
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over, delta } = event;
     setActiveId(null);
@@ -481,10 +504,15 @@ export default function PlotDetail() {
     } else if (active.data.current?.type === 'plant') {
       const inhabitant = [...inhabitants, ...availableInhabitants].find(p => p.id === active.id);
       if (inhabitant && plot) {
-        // Check if dropped over a planter
+        // A tap isn't a drop — leave everything alone.
+        if (Math.abs(delta.x) < 4 && Math.abs(delta.y) < 4) return;
+
+        // Plants only live in beds — never on bare plot.
         if (over && over.data.current?.type === 'planter') {
           const targetPlanter = planters.find(p => p.id === over.id);
-          const newPos = targetPlanter ? targetPlanter.gridPosition : { x: 0, y: 0 };
+          if (!targetPlanter) return;
+          // Land where the pointer actually is inside the bed, not the corner.
+          const newPos = dropCellInPlanter(active.rect.current?.translated, targetPlanter);
           try {
             await updateDoc(doc(db, 'inhabitants', inhabitant.id), {
               plotId: plotId,
@@ -500,33 +528,14 @@ export default function PlotDetail() {
             updatedLayout.push({ id: inhabitant.id, x: newPos.x, y: newPos.y, type: 'plant' });
             await updateDoc(doc(db, 'spatial_plots', plotId), { mapLayout: updatedLayout });
 
-            toast.success(`${inhabitant.name} moved to planter`);
+            toast.success(`${inhabitant.name} planted in ${targetPlanter.name}`);
             warnForCompanionConflicts(inhabitant, newPos);
           } catch (error) {
             handleFirestoreError(error, OperationType.UPDATE, `inhabitants/${inhabitant.id}`);
           }
         } else {
-          const newX = Math.max(0, Math.min(COLS - 1, (inhabitant.gridPosition?.x || 0) + xDiff));
-          const newY = Math.max(0, Math.min(ROWS - 1, (inhabitant.gridPosition?.y || 0) + yDiff));
-          
-          try {
-            await updateDoc(doc(db, 'inhabitants', inhabitant.id), {
-              plotId: plotId,
-              gridPosition: { x: newX, y: newY },
-              planterId: deleteField(),
-              // First real placement: Pending -> Planted
-              ...(inhabitant.status === 'Pending' ? { status: 'Planted' as const } : {}),
-              updatedAt: serverTimestamp()
-            });
-
-            const currentLayout = plot.mapLayout || [];
-            const updatedLayout = currentLayout.filter(item => item.id !== inhabitant.id);
-            updatedLayout.push({ id: inhabitant.id, x: newX, y: newY, type: 'plant' });
-            await updateDoc(doc(db, 'spatial_plots', plotId), { mapLayout: updatedLayout });
-            warnForCompanionConflicts(inhabitant, { x: newX, y: newY });
-          } catch (error) {
-            handleFirestoreError(error, OperationType.UPDATE, `inhabitants/${inhabitant.id}`);
-          }
+          // Dropped on bare plot — not allowed. It animates back on its own.
+          toast.warning('Plants need a bed — drop it on a bed to plant it.', { duration: 4000 });
         }
       }
     }
@@ -1227,6 +1236,7 @@ export default function PlotDetail() {
               className="relative overflow-auto bg-stone-100 rounded-[2.5rem] border-4 border-stone-200 shadow-inner min-h-[420px] p-6 custom-scrollbar"
             >
               <div
+                ref={gridInnerRef}
                 className="relative bg-white shadow-2xl mx-auto rounded-lg border-4 border-primary/60"
                 style={{
                   width: COLS * cell,
@@ -1249,6 +1259,7 @@ export default function PlotDetail() {
                     }}
                     inhabitants={inhabitants.filter(p => p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w && p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h)}
                     activeLayer={activeLayer}
+                    onSelectPlant={handleSelectPlant}
                   />
                 ))}
 
@@ -1300,7 +1311,7 @@ export default function PlotDetail() {
               </DragOverlay>
             </div>
             <p className="text-[11px] font-bold text-on-surface-variant text-center">
-              Drag beds & plants to move them — they stay inside the plot outline. Tap a bed for its details.
+              Drag beds to move them around the plot. Plants only grow in beds — drag a plant onto a bed to plant it, or between beds to move it.
             </p>
           </div>
           {/* Sidebar: Stats */}
@@ -2266,7 +2277,45 @@ function SuitabilityOverlay({ activePlant, plot, inhabitants, cell, cols, rows }
   );
 }
 
-function PlanterItem({ planter, cell, onEdit, onTap, selected, inhabitants, activeLayer }: { planter: Planter, cell: number, onEdit: () => void, onTap: () => void, selected: boolean, inhabitants: Inhabitant[], activeLayer: string }) {
+// A plant living inside a bed: draggable to another bed (or another spot
+// in the same bed), tap for its health drawer. stopPropagation keeps the
+// bed itself from starting a drag when you grab a plant.
+function BedPlantDot({ inhabitant, cell, onSelect }: { inhabitant: Inhabitant; cell: number; onSelect?: (inhabitant: Inhabitant) => void }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: inhabitant.id,
+    data: { type: 'plant' }
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        listeners?.onPointerDown?.(e);
+      }}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (onSelect) onSelect(inhabitant); // handleSelectPlant ignores post-drag taps itself
+      }}
+      style={transform ? { transform: CSS.Translate.toString(transform) } : undefined}
+      className={cn(
+        "w-full aspect-square bg-white rounded-full border border-primary/30 flex items-center justify-center overflow-hidden shadow-sm cursor-grab active:cursor-grabbing botanical-tooltip",
+        isDragging && "opacity-40"
+      )}
+      data-tooltip={inhabitant.name}
+    >
+      {inhabitant.image ? (
+        <img src={inhabitant.image} className="w-full h-full object-cover pointer-events-none" referrerPolicy="no-referrer" />
+      ) : (
+        <Leaf size={Math.max(6, cell / 3)} className="text-primary" />
+      )}
+    </div>
+  );
+}
+
+function PlanterItem({ planter, cell, onEdit, onTap, selected, inhabitants, activeLayer, onSelectPlant }: { planter: Planter, cell: number, onEdit: () => void, onTap: () => void, selected: boolean, inhabitants: Inhabitant[], activeLayer: string, onSelectPlant?: (inhabitant: Inhabitant) => void }) {
   const { setNodeRef, isOver } = useDroppable({
     id: planter.id,
     data: { type: 'planter' }
@@ -2334,16 +2383,10 @@ function PlanterItem({ planter, cell, onEdit, onTap, selected, inhabitants, acti
           <Settings2 size={10} />
         </button>
 
-        {/* Inhabitants inside planter */}
+        {/* Inhabitants inside planter — draggable to other beds */}
         <div className="grid grid-cols-4 gap-1 h-full p-2">
           {inhabitants.map(inhabitant => (
-            <div key={inhabitant.id} className="w-full aspect-square bg-white rounded-full border border-primary/30 flex items-center justify-center overflow-hidden shadow-sm">
-              {inhabitant.image ? (
-                <img src={inhabitant.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-              ) : (
-                <Leaf size={Math.max(6, cell / 3)} className="text-primary" />
-              )}
-            </div>
+            <BedPlantDot key={inhabitant.id} inhabitant={inhabitant} cell={cell} onSelect={onSelectPlant} />
           ))}
         </div>
       </div>
