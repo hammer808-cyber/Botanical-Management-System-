@@ -13,6 +13,7 @@ import Weeding from './components/Weeding';
 import Settings from './components/Settings';
 import GardenCalendar from './components/Calendar';
 import Plots from './components/Plots';
+import CompanionChecker from './components/CompanionChecker';
 import PlotDetail from './components/PlotDetail';
 import Financials from './components/Financials';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -55,6 +56,7 @@ function AppContent() {
           <Route path="/weeding" element={<Weeding />} />
           <Route path="/calendar" element={<GardenCalendar />} />
           <Route path="/plots" element={<Plots />} />
+          <Route path="/companions" element={<CompanionChecker />} />
           <Route path="/financials" element={<Financials />} />
           <Route path="/plots/:plotId" element={
             <ErrorBoundary>

@@ -240,6 +240,62 @@ function areEnemies(nameA: string, nameB: string): boolean {
   );
 }
 
+export type PairVerdict = 'compatible' | 'clash' | 'neutral';
+
+export interface PairCheck {
+  verdict: PairVerdict;
+  reason: string;
+}
+
+/**
+ * 7c. Standalone pair compatibility check (shopping / planning tool).
+ * "I've got basil, can it go next to carrot?" — no grid needed.
+ */
+export function checkPairCompatibility(nameA: string, nameB: string): PairCheck {
+  const a = normalizePlantName(nameA);
+  const b = normalizePlantName(nameB);
+
+  if (!a || !b) {
+    return { verdict: 'neutral', reason: 'Pick two plants to check them against each other.' };
+  }
+  if (a === b) {
+    return {
+      verdict: 'neutral',
+      reason: `That's ${nameA} twice — it'll get along with itself, but the real question is what goes next to it.`,
+    };
+  }
+
+  const relA = BOTANICAL_RELATIONS[a];
+  const relB = BOTANICAL_RELATIONS[b];
+
+  const enemyHit = relA?.enemies.includes(b) || relB?.enemies.includes(a);
+  if (enemyHit) {
+    return {
+      verdict: 'clash',
+      reason: `${nameA} and ${nameB} are foes — they compete for nutrients and stunt each other's growth. Plant them apart.`,
+    };
+  }
+
+  const friendHit = relA?.friends.includes(b) || relB?.friends.includes(a);
+  if (friendHit) {
+    return {
+      verdict: 'compatible',
+      reason: `${nameA} and ${nameB} are companions — they help each other out. Good pairing.`,
+    };
+  }
+
+  return {
+    verdict: 'neutral',
+    reason: `No known beef between ${nameA} and ${nameB} — nothing in the library says they clash.`,
+  };
+}
+
+/** Friends list for "pairs well with" hints, normalized names. */
+export function getFriendsOf(name: string): string[] {
+  const rel = BOTANICAL_RELATIONS[normalizePlantName(name)];
+  return rel?.friends ?? [];
+}
+
 export function checkCompanionConflicts(
   plant: { name: string; familyId?: string },
   position: { x: number; y: number },

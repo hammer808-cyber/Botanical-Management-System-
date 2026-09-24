@@ -27,7 +27,8 @@ import {
   ClipboardList,
   Fence,
   Droplets,
-  DollarSign
+  DollarSign,
+  HeartHandshake
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
@@ -65,6 +66,7 @@ export default function Layout({ children, showBottomNav = true }: LayoutProps) 
     { path: '/weeding', label: 'Weeding', icon: Leaf },
     { path: '/treatment', label: 'Treatment', icon: Droplets },
     { path: '/calendar', label: 'Calendar', icon: Calendar },
+    { path: '/companions', label: 'Companions', icon: HeartHandshake },
   ];
 
   const bottomNavItems = [
