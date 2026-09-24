@@ -154,6 +154,60 @@ export const BOTANICAL_RELATIONS: Record<string, { friends: string[]; enemies: s
   'Cucumber': { friends: ['Corn', 'Beans', 'Marigold'], enemies: ['Sage'] },
 };
 
+/**
+ * 7b. Companion Checker
+ * Bidirectional companion/antagonist conflict detection between a plant
+ * and its grid neighbors. Returns one entry per conflicting neighbor.
+ */
+export interface CompanionConflict {
+  neighborId: string;
+  neighborName: string;
+  type: 'enemy' | 'family';
+  message: string;
+}
+
+function areEnemies(nameA: string, nameB: string): boolean {
+  const relA = BOTANICAL_RELATIONS[nameA];
+  const relB = BOTANICAL_RELATIONS[nameB];
+  return (
+    (relA?.enemies.includes(nameB) ?? false) ||
+    (relB?.enemies.includes(nameA) ?? false)
+  );
+}
+
+export function checkCompanionConflicts(
+  plant: { name: string; familyId?: string },
+  position: { x: number; y: number },
+  neighbors: { id: string; name: string; familyId?: string; gridPosition: { x: number; y: number } }[]
+): CompanionConflict[] {
+  const conflicts: CompanionConflict[] = [];
+  const adjacent = neighbors.filter(
+    (n) =>
+      Math.abs(n.gridPosition.x - position.x) <= 1 &&
+      Math.abs(n.gridPosition.y - position.y) <= 1 &&
+      !(n.gridPosition.x === position.x && n.gridPosition.y === position.y)
+  );
+
+  for (const n of adjacent) {
+    if (areEnemies(plant.name, n.name)) {
+      conflicts.push({
+        neighborId: n.id,
+        neighborName: n.name,
+        type: 'enemy',
+        message: `${plant.name} and ${n.name} are antagonists — they compete for nutrients and stunt each other's growth.`,
+      });
+    } else if (plant.familyId && n.familyId && plant.familyId === n.familyId) {
+      conflicts.push({
+        neighborId: n.id,
+        neighborName: n.name,
+        type: 'family',
+        message: `${plant.name} and ${n.name} are both ${plant.familyId} — same-family neighbors share pests and drain the same nutrients. Give them space.`,
+      });
+    }
+  }
+  return conflicts;
+}
+
 export function calculateSuitabilityScore(
   x: number,
   y: number,

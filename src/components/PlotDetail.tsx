@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { format, addDays } from 'date-fns';
 import DatePicker from 'react-datepicker';
@@ -52,7 +52,8 @@ import {
   Filter,
   Map as MapIcon,
   Tag,
-  Target
+  Target,
+  AlertTriangle
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { logEvent } from '../services/eventService';
@@ -82,6 +83,8 @@ import {
   checkMonoculture, 
   getRecommendedSuccessor,
   checkTreatmentConflict,
+  checkCompanionConflicts,
+  type CompanionConflict,
   BOTANICAL_RELATIONS
 } from '../services/botanyService';
 
@@ -341,12 +344,59 @@ export default function PlotDetail() {
     setActiveType(active.data.current?.type);
   };
 
+  // Companion conflicts per plant, recomputed whenever the bed changes.
+  // Each unordered pair is reported once; attach to both plants for badges.
+  const { conflictMap, conflictList } = useMemo(() => {
+    const map = new Map<string, CompanionConflict[]>();
+    const list: { plantId: string; plantName: string; conflict: CompanionConflict }[] = [];
+    const seen = new Set<string>();
+
+    inhabitants.forEach((p) => {
+      const others = inhabitants.filter((o) => o.id !== p.id);
+      const conflicts = checkCompanionConflicts(
+        { name: p.name, familyId: p.familyId },
+        p.gridPosition,
+        others.map((o) => ({ id: o.id, name: o.name, familyId: o.familyId, gridPosition: o.gridPosition }))
+      );
+      if (conflicts.length > 0) {
+        map.set(p.id, conflicts);
+        conflicts.forEach((c) => {
+          const key = [p.id, c.neighborId].sort().join('|');
+          if (!seen.has(key)) {
+            seen.add(key);
+            list.push({ plantId: p.id, plantName: p.name, conflict: c });
+          }
+        });
+      }
+    });
+    return { conflictMap: map, conflictList: list };
+  }, [inhabitants]);
+
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over, delta } = event;
     setActiveId(null);
     setActiveType(null);
 
     if (!active || !user || !plotId) return;
+
+    // Companion check: warn when a plant lands next to an antagonist
+    // or a same-family neighbor. Runs against pre-drop neighbors (the
+    // dragged plant itself is excluded) at its new position.
+    const warnForCompanionConflicts = (plant: Inhabitant, pos: { x: number; y: number }) => {
+      const conflicts = checkCompanionConflicts(
+        { name: plant.name, familyId: plant.familyId },
+        pos,
+        inhabitants
+          .filter((o) => o.id !== plant.id)
+          .map((o) => ({ id: o.id, name: o.name, familyId: o.familyId, gridPosition: o.gridPosition }))
+      );
+      if (conflicts.length > 0) {
+        toast.warning(
+          `${plant.name} landed next to ${conflicts.map((c) => c.neighborName).join(', ')} — ${conflicts[0].message}`,
+          { duration: 7000 }
+        );
+      }
+    };
 
     const xDiff = Math.round(delta.x / (CELL_SIZE * zoom));
     const yDiff = Math.round(delta.y / (CELL_SIZE * zoom));
@@ -385,6 +435,7 @@ export default function PlotDetail() {
             await updateDoc(doc(db, 'spatial_plots', plotId), { mapLayout: updatedLayout });
 
             toast.success(`${inhabitant.name} moved to planter`);
+            warnForCompanionConflicts(inhabitant, newPos);
           } catch (error) {
             handleFirestoreError(error, OperationType.UPDATE, `inhabitants/${inhabitant.id}`);
           }
@@ -403,6 +454,7 @@ export default function PlotDetail() {
             const updatedLayout = currentLayout.filter(item => item.id !== inhabitant.id);
             updatedLayout.push({ id: inhabitant.id, x: newX, y: newY, type: 'plant' });
             await updateDoc(doc(db, 'spatial_plots', plotId), { mapLayout: updatedLayout });
+            warnForCompanionConflicts(inhabitant, { x: newX, y: newY });
           } catch (error) {
             handleFirestoreError(error, OperationType.UPDATE, `inhabitants/${inhabitant.id}`);
           }
@@ -913,6 +965,32 @@ export default function PlotDetail() {
               </div>
             </div>
 
+            {/* Companion Alerts */}
+            {conflictList.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl space-y-3">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="text-amber-600 shrink-0" size={18} />
+                  <p className="text-xs font-black text-amber-900 uppercase tracking-wider">
+                    Companion Alerts ({conflictList.length})
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  {conflictList.map(({ plantId, plantName, conflict }) => (
+                    <div key={`${plantId}-${conflict.neighborId}`} className="flex gap-2 items-start bg-white/70 rounded-xl p-2.5 border border-amber-100">
+                      <span className={`mt-0.5 shrink-0 text-[9px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-full ${conflict.type === 'enemy' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'}`}>
+                        {conflict.type === 'enemy' ? 'Clash' : 'Crowded'}
+                      </span>
+                      <div className="space-y-0.5">
+                        <p className="text-[11px] font-bold text-stone-800">{plantName} × {conflict.neighborName}</p>
+                        <p className="text-[10px] font-medium text-stone-600 leading-snug">{conflict.message}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] font-medium text-amber-700 italic">Drag a plant to a new spot to clear its alert.</p>
+              </div>
+            )}
+
             {/* Case Manager Alerts */}
             {plot && (
               <div className="space-y-3">
@@ -1048,6 +1126,7 @@ export default function PlotDetail() {
                     name={inhabitant.name}
                     activeLayer={activeLayer}
                     inhabitant={inhabitant}
+                    hasConflict={conflictMap.has(inhabitant.id)}
                   />
                 ))}
 
@@ -2077,7 +2156,7 @@ function PlanterItem({ planter, zoom, onEdit, inhabitants, activeLayer }: { plan
   );
 }
 
-function DraggableItem({ id, type, position, size, zoom, image, name, activeLayer, inhabitant }: { id: string, type: string, position: { x: number, y: number }, size: { w: number, h: number }, zoom: number, image?: string, name: string, activeLayer: string, inhabitant?: Inhabitant }) {
+function DraggableItem({ id, type, position, size, zoom, image, name, activeLayer, inhabitant, hasConflict }: { id: string, type: string, position: { x: number, y: number }, size: { w: number, h: number }, zoom: number, image?: string, name: string, activeLayer: string, inhabitant?: Inhabitant, hasConflict?: boolean }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: id,
     data: { type: type }
@@ -2128,6 +2207,11 @@ function DraggableItem({ id, type, position, size, zoom, image, name, activeLaye
         <img src={image} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
       ) : (
         <Leaf size={16 * zoom} className="text-primary" />
+      )}
+      {hasConflict && (
+        <div className="absolute -top-1 -right-1 bg-amber-400 rounded-full p-0.5 shadow-md border border-white" title="Companion conflict — check alerts">
+          <AlertTriangle size={10 * zoom} className="text-amber-900" />
+        </div>
       )}
       <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-stone-800 text-white text-[8px] px-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
         {name}
