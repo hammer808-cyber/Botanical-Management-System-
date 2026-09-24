@@ -7,9 +7,10 @@ export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
     plugins: [react(), tailwindcss()],
-    // Relative asset paths so the production build works from any
-    // hosted subpath (e.g. GitHub Pages project sites).
-    base: './',
+    // Absolute base so the production build works from the GitHub Pages
+    // project subpath. Pair with the Router basename in App.tsx and the
+    // public/404.html SPA fallback so deep links survive refreshes.
+    base: '/Botanical-Management-System-/',
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
     },
