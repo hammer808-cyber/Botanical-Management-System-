@@ -5,6 +5,7 @@ import { cn } from '@/src/lib/utils';
 import { Link, useNavigate } from 'react-router-dom';
 import { GoogleGenAI } from "@google/genai";
 import { useFirebase } from '../contexts/FirebaseContext';
+import { useActivePlot } from '../contexts/ActivePlotContext';
 import { db, collection, query, where, getDocs } from '../firebase';
 
 interface Message {
@@ -15,6 +16,7 @@ interface Message {
 
 export default function Chat() {
   const { user } = useFirebase();
+  const { activePlotId, activePlot } = useActivePlot();
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -45,19 +47,22 @@ export default function Chat() {
     setIsLoading(true);
 
     try {
-      // Fetch user's plants for context
-      const q = query(collection(db, 'plants'), where('ownerUid', '==', user?.uid));
+      // Fetch the active plot's plants for context
+      const q = query(collection(db, 'inhabitants'), where('ownerUid', '==', user?.uid));
       const snapshot = await getDocs(q);
-      const plants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      
-      const plantContext = plants.map((p: any) => `${p.name} (${p.scientific}) - Status: ${p.status}, Vigor: ${p.vigor}/5`).join('\n');
+      const allPlants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      const plants = activePlotId ? allPlants.filter((p: any) => p.plotId === activePlotId) : allPlants;
+
+      const plantContext = plants.map((p: any) => `${p.name} (${p.scientific || p.latinName || ''}) - Status: ${p.status}, Vigor: ${p.vigorIndex ?? 'unknown'}%`).join('\n');
 
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      const prompt = `You are Botanist Sarah, a friendly and expert master gardener. 
-      You are helping a user with their garden. 
-      
-      User's Garden Data:
-      ${plantContext || "No plants in the garden yet."}
+      const prompt = `You are Botanist Sarah, a friendly and expert master gardener.
+      You are helping a user with their garden.
+
+      The user's currently active plot is "${activePlot?.name || 'their garden'}". Answer in the context of this plot unless they ask about another.
+
+      User's Garden Data (active plot):
+      ${plantContext || "No plants in the active plot yet."}
       
       User Question: "${text}"
       

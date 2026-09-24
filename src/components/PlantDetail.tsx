@@ -6,6 +6,7 @@ import DatePicker from 'react-datepicker';
 import "react-datepicker/dist/react-datepicker.css";
 import { cn } from '@/src/lib/utils';
 import { useFirebase } from '../contexts/FirebaseContext';
+import { recalculateVigor, type VigorBreakdown } from '../lib/vigor';
 import { db, doc, onSnapshot, updateDoc, deleteDoc, handleFirestoreError, OperationType, serverTimestamp, query, collection, where, ref, uploadBytes, getDownloadURL, storage, addDoc, runTransaction } from '../firebase';
 import { toast } from 'sonner';
 import { Inhabitant, EventLog } from '../types';
@@ -157,10 +158,15 @@ export default function PlantDetail() {
 
     try {
       const plantRef = doc(db, 'inhabitants', id);
+      const { vigorIndex: _dropped, ...safeForm } = editForm as any;
       await updateDoc(plantRef, {
-        ...editForm,
+        ...safeForm,
         updatedAt: serverTimestamp()
       });
+      // Status/notes changed -> recompute the condition factor (other factors preserved)
+      if (plant) {
+        recalculateVigor({ ...plant, ...safeForm } as any).catch(() => {});
+      }
       setIsEditing(false);
       toast.success('Botanical record updated!');
     } catch (error) {
@@ -175,6 +181,8 @@ export default function PlantDetail() {
         lastWatered: new Date().toISOString(),
         status: 'Healthy'
       });
+      // Recalculate vigor from the fresh watering (pest factor preserved)
+      recalculateVigor({ ...plant, lastWatered: new Date().toISOString(), status: 'Healthy' } as any, eventLogs as any).catch(() => {});
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `inhabitants/${id}`);
     }
@@ -470,7 +478,7 @@ export default function PlantDetail() {
                   </div>
                   <div>
                     <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant opacity-50">Vigor Index</p>
-                    <p className="text-sm font-bold text-on-surface">{eliteMetrics?.vigorIndex || plant.vigorIndex || 0}%</p>
+                    <p className="text-sm font-bold text-on-surface">{plant.vigorIndex ?? '—'}{plant.vigorIndex != null ? '%' : ''}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -509,6 +517,38 @@ export default function PlantDetail() {
             </motion.div>
           </div>
         </div>
+
+        {/* How this score was earned — calculated from real events, never hand-entered */}
+        {(plant as any).vigorBreakdown && (
+          <div className="px-6 mt-8">
+            <div className="bg-surface-container-low rounded-[2.5rem] p-8 border border-outline-variant/10">
+              <h3 className="font-headline text-xl font-black text-on-surface mb-1">Vigor breakdown</h3>
+              <p className="text-xs text-on-surface-variant font-medium mb-6">Calculated from your waterings, treatments and notes. Updates when you log care.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {[
+                  { label: 'Hydration', value: (plant as any).vigorBreakdown.hydration, hint: 'Days since last watering' },
+                  { label: 'Condition', value: (plant as any).vigorBreakdown.condition, hint: 'Status + your notes' },
+                  { label: 'Pest pressure', value: (plant as any).vigorBreakdown.pests, hint: 'Active vs resolved treatments' },
+                  { label: 'Care momentum', value: (plant as any).vigorBreakdown.care, hint: 'Recent care events' },
+                ].map(f => (
+                  <div key={f.label} className="bg-white/60 rounded-2xl p-4">
+                    <div className="flex items-baseline justify-between mb-2">
+                      <p className="text-xs font-black uppercase tracking-widest text-on-surface-variant">{f.label}</p>
+                      <p className="text-lg font-black text-on-surface">{f.value}%</p>
+                    </div>
+                    <div className="h-2 rounded-full bg-stone-200 overflow-hidden mb-2">
+                      <div
+                        className={cn("h-full rounded-full", f.value >= 70 ? "bg-primary" : f.value >= 40 ? "bg-amber-500" : "bg-error")}
+                        style={{ width: `${f.value}%` }}
+                      />
+                    </div>
+                    <p className="text-[11px] text-on-surface-variant font-medium">{f.hint}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Elite Insights Section */}
         <div className="px-6 mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -596,15 +636,10 @@ export default function PlantDetail() {
                       </select>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant ml-1">Vigor Index (%)</label>
-                      <input 
-                        type="number" 
-                        min="0" 
-                        max="100"
-                        value={editForm.vigorIndex}
-                        onChange={(e) => setEditForm({...editForm, vigorIndex: parseInt(e.target.value)})}
-                        className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20"
-                      />
+                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant ml-1">Vigor Index</label>
+                      <div className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold text-on-surface-variant">
+                        {plant.vigorIndex ?? '—'}{plant.vigorIndex != null ? '%' : ''} — calculated from your waterings, treatments and notes
+                      </div>
                     </div>
                   </div>
 

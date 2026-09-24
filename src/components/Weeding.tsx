@@ -29,6 +29,7 @@ import {
 } from 'recharts';
 import { format, subDays, isWithinInterval, startOfDay, endOfDay, subMonths } from 'date-fns';
 import { useFirebase } from '../contexts/FirebaseContext';
+import { useActivePlot } from '../contexts/ActivePlotContext';
 import { logEvent } from '../services/eventService';
 import { 
   db, 
@@ -88,9 +89,16 @@ const WEED_FACTS = [
 
 export default function Weeding() {
   const { user } = useFirebase();
+  const { activePlotId, activePlot } = useActivePlot();
   const [events, setEvents] = useState<any[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Active-plot scope: legacy events without a plotId stay visible everywhere.
+  const visibleEvents = React.useMemo(
+    () => events.filter(e => !e.plotId || !activePlotId || e.plotId === activePlotId),
+    [events, activePlotId]
+  );
   
   // Form state
   const [newEntry, setNewEntry] = useState({
@@ -147,6 +155,7 @@ export default function Weeding() {
         eventType: 'Weeding',
         data: {
           ...newEntry,
+          plotId: activePlotId || null,
           timestamp: new Date().toISOString()
         },
         calendarTitle: `Weeding: ${newEntry.weedType} in ${newEntry.zone}`,
@@ -233,7 +242,7 @@ export default function Weeding() {
   const getZoneData = () => {
     const zoneCounts = ZONES.map(zone => ({
       name: zone,
-      value: events.filter(e => e.zone === zone).length
+      value: visibleEvents.filter(e => e.zone === zone).length
     }));
     return zoneCounts.filter(z => z.value > 0);
   };
@@ -328,7 +337,7 @@ export default function Weeding() {
                   <div>
                     <span className="block font-bold text-sm">{zone}</span>
                     <span className="text-[10px] text-on-surface-variant uppercase font-black tracking-tighter">
-                      {events.filter(e => e.zone === zone).length} Events
+                      {visibleEvents.filter(e => e.zone === zone).length} Events
                     </span>
                   </div>
                 </div>
@@ -341,8 +350,8 @@ export default function Weeding() {
             <div className="absolute inset-0 border-2 border-dashed border-white/10 pointer-events-none z-0"></div>
             
             {ZONES.map((zone, i) => {
-              const count = events.filter(e => e.zone === zone).length;
-              const maxCount = Math.max(...ZONES.map(z => events.filter(e => e.zone === z).length), 1);
+              const count = visibleEvents.filter(e => e.zone === zone).length;
+              const maxCount = Math.max(...ZONES.map(z => visibleEvents.filter(e => e.zone === z).length), 1);
               const opacity = 0.3 + (count / maxCount) * 0.7;
               
               // Custom grid positioning
@@ -507,12 +516,12 @@ export default function Weeding() {
 
           <div className="space-y-4">
             <AnimatePresence mode="popLayout">
-              {events.length === 0 ? (
+              {visibleEvents.length === 0 ? (
                 <div className="p-12 text-center bg-surface-container-lowest rounded-[2rem] border border-dashed border-outline-variant/30">
                   <p className="text-on-surface-variant italic">No weeding events recorded yet. Start by logging your first session.</p>
                 </div>
               ) : (
-                events.map((event) => (
+                visibleEvents.map((event) => (
                   <motion.div
                     key={event.id}
                     layout

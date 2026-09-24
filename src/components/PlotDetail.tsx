@@ -54,7 +54,8 @@ import {
   Tag,
   Target,
   AlertTriangle,
-  ShieldAlert
+  ShieldAlert,
+  ChevronRight
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { logEvent } from '../services/eventService';
@@ -65,6 +66,7 @@ import { toast } from 'sonner';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import PlotEditForm, { PlotEditData } from './PlotEditForm';
 import { isPlanted, countPlanted, countWaiting } from '../lib/plotStats';
+import { recalculateVigor, refreshStaleVigor, averageVigor } from '../lib/vigor';
 import WeedWarriorWizard from './WeedWarriorWizard';
 import TreatmentConflictModal from './TreatmentConflictModal';
 
@@ -245,9 +247,8 @@ export default function PlotDetail() {
     if (!plot || inhabitants.length === 0) return null;
     
     const thirstyCount = inhabitants.filter(p => p.status === 'Thirsty').length;
-    const avgVigor = inhabitants.length > 0 
-      ? (inhabitants.reduce((acc, p) => acc + (p.vigorIndex || 0), 0) / inhabitants.length).toFixed(1)
-      : "0";
+    const avgVigorNum = averageVigor(inhabitants);
+    const avgVigor = avgVigorNum === null ? null : avgVigorNum.toFixed(1);
       
     return {
       monoculture: checkMonoculture(inhabitants),
@@ -341,6 +342,18 @@ export default function PlotDetail() {
     };
   }, [user, plotId, navigate]);
 
+  // Background vigor refresh: recompute stale/never-calculated scores once data lands.
+  // Logs are filtered per-plant inside the engine, so the all-plots query can't leak.
+  const vigorRefreshed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!plotId || inhabitants.length === 0 || vigorRefreshed.current === plotId) return;
+    vigorRefreshed.current = plotId;
+    const t = setTimeout(() => {
+      refreshStaleVigor(inhabitants, eventLogs as any).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [plotId, inhabitants, eventLogs]);
+
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event;
     setActiveId(active.id as string);
@@ -424,6 +437,31 @@ export default function PlotDetail() {
     }
   };
 
+  // Geometric bed hit-test: which bed (if any) contains the pointer's grid
+  // cell? Uses the dragged node's own translated rect, so it doesn't depend
+  // on dnd-kit's `over` (whose droppable rects can go stale when the page
+  // scrolls mid-drag). Returns null when the pointer isn't over the grid.
+  const bedAtPointer = (activeRect: { left: number; top: number; width: number; height: number } | null | undefined) => {
+    try {
+      const gridEl = gridInnerRef.current;
+      if (!activeRect || !gridEl || !cell) return null;
+      const box = gridEl.getBoundingClientRect();
+      const cx = activeRect.left + activeRect.width / 2 - box.left;
+      const cy = activeRect.top + activeRect.height / 2 - box.top;
+      if (cx < 0 || cy < 0 || cx > COLS * cell || cy > ROWS * cell) return null;
+      const gx = Math.floor(cx / cell);
+      const gy = Math.floor(cy / cell);
+      const bed = planters.find(p =>
+        p.gridPosition && p.size &&
+        gx >= p.gridPosition.x && gx < p.gridPosition.x + p.size.w &&
+        gy >= p.gridPosition.y && gy < p.gridPosition.y + p.size.h
+      );
+      return bed ? { bed, pos: { x: gx, y: gy } } : null;
+    } catch {
+      return null;
+    }
+  };
+
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over, delta } = event;
     setActiveId(null);
@@ -483,7 +521,7 @@ export default function PlotDetail() {
         if (dx !== 0 || dy !== 0) {
           const riders = inhabitants.filter(p =>
             p.planterId === planter.id ||
-            (!p.planterId &&
+            (!p.planterId && p.gridPosition &&
               p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w &&
               p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h)
           );
@@ -503,16 +541,38 @@ export default function PlotDetail() {
       }
     } else if (active.data.current?.type === 'plant') {
       const inhabitant = [...inhabitants, ...availableInhabitants].find(p => p.id === active.id);
+      if (!inhabitant) {
+        toast.error('Could not find that plant — try again.');
+        return;
+      }
       if (inhabitant && plot) {
         // A tap isn't a drop — leave everything alone.
         if (Math.abs(delta.x) < 4 && Math.abs(delta.y) < 4) return;
 
-        // Plants only live in beds — never on bare plot.
-        if (over && over.data.current?.type === 'planter') {
-          const targetPlanter = planters.find(p => p.id === over.id);
-          if (!targetPlanter) return;
+        // Plants only live in beds — never on bare plot. Find the bed
+        // geometrically first (robust to stale droppable rects), then fall
+        // back to dnd-kit's `over` target.
+        const translated = active.rect.current?.translated;
+        let target = bedAtPointer(translated);
+        if (!target && over && over.data.current?.type === 'planter') {
+          const bed = planters.find(p => p.id === over.id);
+          if (bed) target = { bed, pos: dropCellInPlanter(translated, bed) };
+        }
+        // Dropped back over the rail (above the grid): silent snap-back.
+        if (!target && translated && gridInnerRef.current) {
+          const box = gridInnerRef.current.getBoundingClientRect();
+          const cy = translated.top + translated.height / 2 - box.top;
+          if (cy < 0) return;
+        }
+        if (!target) {
+          // Dropped on bare plot — not allowed. It animates back on its own.
+          toast.warning('Plants need a bed — drop it on a bed to plant it.', { duration: 4000 });
+          return;
+        }
+        {
+          const targetPlanter = target.bed;
           // Land where the pointer actually is inside the bed, not the corner.
-          const newPos = dropCellInPlanter(active.rect.current?.translated, targetPlanter);
+          const newPos = target.pos;
           try {
             await updateDoc(doc(db, 'inhabitants', inhabitant.id), {
               plotId: plotId,
@@ -533,9 +593,6 @@ export default function PlotDetail() {
           } catch (error) {
             handleFirestoreError(error, OperationType.UPDATE, `inhabitants/${inhabitant.id}`);
           }
-        } else {
-          // Dropped on bare plot — not allowed. It animates back on its own.
-          toast.warning('Plants need a bed — drop it on a bed to plant it.', { duration: 4000 });
         }
       }
     }
@@ -551,7 +608,7 @@ export default function PlotDetail() {
         const pos = updates.gridPosition || planter.gridPosition;
         const riders = inhabitants.filter(p =>
           p.planterId === id ||
-          (!p.planterId &&
+          (!p.planterId && p.gridPosition &&
             p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w &&
             p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h)
         );
@@ -579,7 +636,7 @@ export default function PlotDetail() {
     try {
       const inhabitantsInPlanter = inhabitants.filter(p =>
         p.planterId === id ||
-        (!p.planterId &&
+        (!p.planterId && p.gridPosition &&
           p.gridPosition.x >= planters.find(pl => pl.id === id)!.gridPosition.x && p.gridPosition.x < planters.find(pl => pl.id === id)!.gridPosition.x + planters.find(pl => pl.id === id)!.size.w && p.gridPosition.y >= planters.find(pl => pl.id === id)!.gridPosition.y && p.gridPosition.y < planters.find(pl => pl.id === id)!.gridPosition.y + planters.find(pl => pl.id === id)!.size.h)
       );
       for (const inhabitant of inhabitantsInPlanter) {
@@ -621,7 +678,7 @@ export default function PlotDetail() {
       const dy = newY - planter.gridPosition.y;
       const riders = inhabitants.filter(p =>
         p.planterId === id ||
-        (!p.planterId &&
+        (!p.planterId && p.gridPosition &&
           p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w &&
           p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h)
       );
@@ -760,6 +817,7 @@ export default function PlotDetail() {
           targetId: plotId,
           targetType: 'SpatialPlot',
           type: 'Treatment',
+          plotId: plotId,
           action: newLog.action,
           notes: newLog.notes,
           date: new Date().toISOString()
@@ -911,6 +969,7 @@ export default function PlotDetail() {
           targetId: inhabitantId,
           targetType: 'Inhabitant',
           type: 'Watering',
+          plotId: plotId,
           notes: `Hydrated ${inhabitant.name}`,
           date: new Date().toISOString()
         },
@@ -923,6 +982,9 @@ export default function PlotDetail() {
         needsWater: false,
         nextWatering: format(nextDate, 'yyyy-MM-dd')
       });
+
+      // Recalculate vigor from the fresh watering event
+      recalculateVigor({ ...inhabitant, needsWater: false, nextWatering: format(nextDate, 'yyyy-MM-dd') } as Inhabitant, eventLogs as any).catch(() => {});
 
       toast.success(`${inhabitant.name} hydrated and logged!`);
     } catch (error) {
@@ -991,7 +1053,7 @@ export default function PlotDetail() {
           if (!planter) return null;
           const bedPlants = inhabitants.filter(p =>
             p.planterId === planter.id ||
-            (!p.planterId &&
+            (!p.planterId && p.gridPosition &&
               p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w &&
               p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h)
           );
@@ -1110,7 +1172,7 @@ export default function PlotDetail() {
               </div>
               <div className="flex items-center gap-2">
                 <Activity size={16} className="text-primary" />
-                <span>Vigor: <span className="font-black text-on-surface">{eliteInsights?.avgVigor || '0'}%</span></span>
+                <span>Vigor: <span className="font-black text-on-surface">{eliteInsights?.avgVigor ? `${eliteInsights.avgVigor}%` : '—'}</span></span>
               </div>
               <div className="flex items-center gap-2">
                 <Info size={16} className="text-primary" />
@@ -1257,13 +1319,13 @@ export default function PlotDetail() {
                       if (suppressClickRef.current) return;
                       setSelectedPlanterId(prev => prev === planter.id ? null : planter.id);
                     }}
-                    inhabitants={inhabitants.filter(p => p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w && p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h)}
+                    inhabitants={inhabitants.filter(p => (p.gridPosition?.x ?? -1) >= planter.gridPosition.x && (p.gridPosition?.x ?? -1) < planter.gridPosition.x + planter.size.w && (p.gridPosition?.y ?? -1) >= planter.gridPosition.y && (p.gridPosition?.y ?? -1) < planter.gridPosition.y + planter.size.h)}
                     activeLayer={activeLayer}
                     onSelectPlant={handleSelectPlant}
                   />
                 ))}
 
-                {inhabitants.filter(p => !planters.some(pl => p.gridPosition.x >= pl.gridPosition.x && p.gridPosition.x < pl.gridPosition.x + pl.size.w && p.gridPosition.y >= pl.gridPosition.y && p.gridPosition.y < pl.gridPosition.y + pl.size.h)).map(inhabitant => (
+                {inhabitants.filter(p => !planters.some(pl => (p.gridPosition?.x ?? -1) >= pl.gridPosition.x && (p.gridPosition?.x ?? -1) < pl.gridPosition.x + pl.size.w && (p.gridPosition?.y ?? -1) >= pl.gridPosition.y && (p.gridPosition?.y ?? -1) < pl.gridPosition.y + pl.size.h)).map(inhabitant => (
                   <DraggableItem
                     key={inhabitant.id}
                     id={inhabitant.id}
@@ -1313,6 +1375,65 @@ export default function PlotDetail() {
             <p className="text-[11px] font-bold text-on-surface-variant text-center">
               Drag beds to move them around the plot. Plants only grow in beds — drag a plant onto a bed to plant it, or between beds to move it.
             </p>
+
+            {/* Bed cards — one per bed, tap for the focused single-bed view */}
+            {planters.length > 0 && (
+              <div className="mt-6">
+                <div className="flex items-center justify-between mb-3 px-1">
+                  <h3 className="text-xs font-black uppercase tracking-[0.2em] text-on-surface-variant">Beds in this plot</h3>
+                  <span className="text-[11px] font-bold text-on-surface-variant">{planters.length} bed{planters.length === 1 ? '' : 's'}</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {planters.map(bed => {
+                    const bedPlants = inhabitants.filter(p =>
+                      p.planterId === bed.id ||
+                      (!p.planterId && p.gridPosition &&
+                        p.gridPosition.x >= bed.gridPosition.x && p.gridPosition.x < bed.gridPosition.x + bed.size.w &&
+                        p.gridPosition.y >= bed.gridPosition.y && p.gridPosition.y < bed.gridPosition.y + bed.size.h)
+                    );
+                    const vigor = averageVigor(bedPlants);
+                    return (
+                      <button
+                        key={bed.id}
+                        onClick={() => navigate(`/plots/${plotId}/beds/${bed.id}`)}
+                        className="text-left bg-white rounded-2xl border border-outline-variant/30 p-4 hover:border-primary/40 hover:shadow-md transition-all"
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-black text-sm text-on-surface truncate">{bed.name || 'Bed'}</span>
+                          <ChevronRight size={16} className="text-on-surface-variant shrink-0" />
+                        </div>
+                        <div className="flex items-center gap-4 text-[11px] font-bold text-on-surface-variant">
+                          <span className="flex items-center gap-1"><Leaf size={12} /> {bedPlants.length} plant{bedPlants.length === 1 ? '' : 's'}</span>
+                          <span>{bed.size.w}×{bed.size.h} cells</span>
+                          <span className={cn("ml-auto", vigor === null ? "text-on-surface-variant/50" : vigor >= 70 ? "text-emerald-600" : vigor >= 40 ? "text-amber-600" : "text-rose-600")}>
+                            {vigor === null ? 'Vigor —' : `Vigor ${vigor}%`}
+                          </span>
+                        </div>
+                        {/* Mini bed preview: plant dots in their cells */}
+                        <div
+                          className="relative mt-3 rounded-lg bg-primary/5 border border-primary/10 overflow-hidden"
+                          style={{ height: Math.max(28, bed.size.h * 10) }}
+                        >
+                          {bedPlants.filter(p => p.gridPosition).map(p => (
+                            <div
+                              key={p.id}
+                              className="absolute rounded-full bg-primary/70"
+                              style={{
+                                left: `${((p.gridPosition.x - bed.gridPosition.x) / bed.size.w) * 100}%`,
+                                top: `${((p.gridPosition.y - bed.gridPosition.y) / bed.size.h) * 100}%`,
+                                width: `${Math.min(100 / bed.size.w, 22)}%`,
+                                aspectRatio: '1',
+                                transform: 'translate(10%, 10%)'
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
           {/* Sidebar: Stats */}
           <div className="lg:col-span-1 space-y-6">
@@ -2383,11 +2504,22 @@ function PlanterItem({ planter, cell, onEdit, onTap, selected, inhabitants, acti
           <Settings2 size={10} />
         </button>
 
-        {/* Inhabitants inside planter — draggable to other beds */}
-        <div className="grid grid-cols-4 gap-1 h-full p-2">
-          {inhabitants.map(inhabitant => (
-            <BedPlantDot key={inhabitant.id} inhabitant={inhabitant} cell={cell} onSelect={onSelectPlant} />
-          ))}
+        {/* Inhabitants inside planter — positioned by their grid cell relative
+            to the bed, so a drop lands exactly where the pointer was. */}
+        <div className="absolute inset-0 pointer-events-none">
+          {inhabitants.filter(i => i.gridPosition).map(inhabitant => {
+            const rx = (inhabitant.gridPosition.x - planter.gridPosition.x) * cell;
+            const ry = (inhabitant.gridPosition.y - planter.gridPosition.y) * cell;
+            return (
+              <div
+                key={inhabitant.id}
+                className="absolute pointer-events-auto p-[1px]"
+                style={{ left: rx, top: ry, width: cell, height: cell }}
+              >
+                <BedPlantDot inhabitant={inhabitant} cell={cell} onSelect={onSelectPlant} />
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

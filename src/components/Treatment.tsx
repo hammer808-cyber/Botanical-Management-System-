@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, ArrowRight, Droplets, Sun, Thermometer, Scissors, Info, CheckCircle, ShieldCheck, Wind, HeartPulse, AlertTriangle, Bug, FlaskConical, History, XCircle, Plus, ClipboardList, Beaker, ListChecks, Leaf, Flower2, ExternalLink, Camera, Check } from 'lucide-react';
 import { useFirebase } from '../contexts/FirebaseContext';
+import { recalculateVigor } from '../lib/vigor';
+import { useActivePlot } from '../contexts/ActivePlotContext';
 import { db, collection, query, where, onSnapshot, handleFirestoreError, OperationType, updateDoc, doc, addDoc, serverTimestamp, deleteDoc } from '../firebase';
 import { GoogleGenAI } from "@google/genai";
 import { cn } from '@/src/lib/utils';
@@ -162,6 +164,7 @@ const SARCASTIC_COMMENTS = [
 
 export default function Treatment() {
   const { user } = useFirebase();
+  const { activePlotId, activePlot } = useActivePlot();
   const navigate = useNavigate();
   const [sickPlants, setSickPlants] = useState<Inhabitant[]>([]);
   const [allPlants, setAllPlants] = useState<Inhabitant[]>([]);
@@ -186,6 +189,20 @@ export default function Treatment() {
   const [conflictModalData, setConflictModalData] = useState<{ isOpen: boolean; message: string; action: string; conflictingAction: string; conflictingDate: string } | null>(null);
   const [editingSuccessRateId, setEditingSuccessRateId] = useState<string | null>(null);
   const [editSuccessRateValue, setEditSuccessRateValue] = useState('');
+
+  // Active-plot scope: everything on this page follows the global active plot.
+  const visibleAllPlants = React.useMemo(
+    () => allPlants.filter(p => !activePlotId || p.plotId === activePlotId),
+    [allPlants, activePlotId]
+  );
+  const visibleSickPlants = React.useMemo(
+    () => sickPlants.filter(p => !activePlotId || p.plotId === activePlotId),
+    [sickPlants, activePlotId]
+  );
+  const visibleTreatmentLogs = React.useMemo(() => {
+    const ids = new Set(visibleAllPlants.map(p => p.id));
+    return treatmentLogs.filter(l => !l.plantId || ids.has(l.plantId));
+  }, [treatmentLogs, visibleAllPlants]);
 
   useEffect(() => {
     if (!user) return;
@@ -251,9 +268,13 @@ export default function Treatment() {
 
       await updateDoc(doc(db, 'inhabitants', id), {
         status: 'Healthy',
-        vigorIndex: Math.min(100, Math.floor((parseInt(rate) || 100))),
         needsWater: false
       });
+      const resolvedTreatments = treatmentLogs.map(l => l.id === (activeLog && activeLog.id) ? { ...l, status: 'Resolved', successRate: parseInt(rate) || 100, resolvedAt: new Date() } : l);
+      const resolvedPlant = sickPlants.find(p => p.id === id) || visibleAllPlants.find(p => p.id === id);
+      if (resolvedPlant) {
+        recalculateVigor({ ...resolvedPlant, status: 'Healthy', needsWater: false } as any, undefined, resolvedTreatments as any).catch(() => {});
+      }
 
       // Create calendar event for resolution
       const plant = sickPlants.find(p => p.id === id);
@@ -408,6 +429,7 @@ export default function Treatment() {
         data: {
           plantId: formPlantId,
           plantName: plant.name,
+          plotId: plant.plotId || activePlotId || null,
           disease: diseaseName,
           diseaseId: diseaseId,
           treatment: treatmentDesc,
@@ -426,13 +448,12 @@ export default function Treatment() {
         targetType: 'Inhabitant'
       });
 
-      // Also mark plant as struggling if it isn't already
+      // Mark plant as struggling and recompute vigor from the new active treatment
+      const newTreatment = { id: treatmentRef?.id, plantId: formPlantId, status: 'Active', successRate: parseInt(formSuccessRate) || null };
       if (plant.status !== 'Struggling') {
-        await updateDoc(doc(db, 'inhabitants', formPlantId), {
-          status: 'Struggling',
-          vigorIndex: 20
-        });
+        await updateDoc(doc(db, 'inhabitants', formPlantId), { status: 'Struggling' });
       }
+      recalculateVigor({ ...plant, status: 'Struggling' } as any, undefined, [...treatmentLogs, newTreatment] as any).catch(() => {});
 
       setIsLogFormOpen(false);
       setFormPlantId('');
@@ -500,6 +521,11 @@ export default function Treatment() {
         <p className="text-on-surface-variant text-lg max-w-lg leading-relaxed relative z-10">
           Identify afflictions, log treatments, and track the recovery of your botanical patients.
         </p>
+        {activePlot && (
+          <p className="relative z-10 inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest text-primary bg-primary/10 px-4 py-1.5 rounded-full w-fit">
+            Showing {activePlot.name}
+          </p>
+        )}
       </section>
 
       {/* Action Buttons */}
@@ -520,11 +546,11 @@ export default function Treatment() {
         <div className="flex justify-between items-end relative z-10">
           <h3 className="font-headline text-2xl font-bold text-primary">Plants in Recovery</h3>
           <span className="text-xs font-black uppercase tracking-widest text-tertiary bg-tertiary/10 px-4 py-1.5 rounded-full">
-            {sickPlants.length} Active Cases
+            {visibleSickPlants.length} Active Cases
           </span>
         </div>
 
-        {sickPlants.length === 0 ? (
+        {visibleSickPlants.length === 0 ? (
           <div className="glass-card p-12 rounded-[3rem] text-center border-2 border-dashed border-outline-variant/30 relative z-10">
             <CheckCircle className="mx-auto text-primary mb-4" size={48} />
             <p className="font-headline font-bold text-xl text-primary">All plants are thriving!</p>
@@ -532,7 +558,7 @@ export default function Treatment() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 relative z-10">
-            {sickPlants.map((plant) => (
+            {visibleSickPlants.map((plant) => (
               <motion.div 
                 key={plant.id}
                 layoutId={plant.id}
@@ -614,12 +640,12 @@ export default function Treatment() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/10">
-                {treatmentLogs.length === 0 ? (
+                {visibleTreatmentLogs.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-8 py-12 text-center text-on-surface-variant italic">No treatments logged yet.</td>
                   </tr>
                 ) : (
-                  treatmentLogs.map((log) => (
+                  visibleTreatmentLogs.map((log) => (
                     <tr key={log.id} className="hover:bg-surface-container-lowest transition-colors group">
                       <td className="px-8 py-6">
                         <div className="flex items-center gap-3">
@@ -844,7 +870,7 @@ export default function Treatment() {
                         className="w-full p-4 bg-surface-container-high rounded-2xl border-none focus:ring-2 focus:ring-primary transition-all"
                       >
                         <option value="">Choose a plant...</option>
-                        {allPlants.map(p => (
+                        {visibleAllPlants.map(p => (
                           <option key={p.id} value={p.id}>{p.name} ({p.status})</option>
                         ))}
                       </select>

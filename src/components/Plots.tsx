@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Trash2, DollarSign, TrendingUp, Calendar, Tag, ChevronRight, Activity, Map as MapIcon, Filter, Search, X, Check, ExternalLink, Edit3 } from 'lucide-react';
 import { db, collection, query, where, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, handleFirestoreError, OperationType, updateDoc, getDocs, deleteField, batchDelete } from '../firebase';
 import { useFirebase } from '../contexts/FirebaseContext';
+import { useActivePlot } from '../contexts/ActivePlotContext';
 import { cn } from '@/src/lib/utils';
 import { toast } from 'sonner';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
@@ -21,6 +22,7 @@ import {
 
 export default function Plots() {
   const { user } = useFirebase();
+  const { activePlotId, setActivePlotId } = useActivePlot();
   const navigate = useNavigate();
   const location = useLocation();
   const [plots, setPlots] = useState<SpatialPlot[]>([]);
@@ -360,6 +362,7 @@ export default function Plots() {
                 <div className="flex gap-2">
                     <Link 
                       to={`/plots/${plot.id}`}
+                      onClick={() => setActivePlotId(plot.id)}
                       aria-label={`View details for plot ${plot.name}. ${planted} planted${waiting > 0 ? `, ${waiting} waiting to place` : ''}.`}
                       className={cn(
                         "flex-1 p-6 rounded-[2rem] text-left transition-all border flex items-center justify-between group/card touch-target",
@@ -371,7 +374,10 @@ export default function Plots() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="block font-black text-lg tracking-tight truncate">{plot.name}</span>
-                          {plot.status === 'Active' && (
+                          {plot.id === activePlotId && (
+                            <span className="text-[10px] font-black uppercase tracking-widest bg-primary/15 text-primary px-2 py-0.5 rounded-full shrink-0">Active</span>
+                          )}
+                          {plot.status === 'Active' && plot.id !== activePlotId && (
                             <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse shrink-0"></span>
                           )}
                         </div>
@@ -489,6 +495,7 @@ export default function Plots() {
             onClose={() => setShowAddPlot(false)}
             onComplete={(plotId) => {
               setShowAddPlot(false);
+              setActivePlotId(plotId);
               navigate(`/plots/${plotId}`);
             }}
           />

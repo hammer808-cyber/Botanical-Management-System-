@@ -4,6 +4,7 @@ import { Search, Filter, ArrowRight, Info, Leaf, Droplets, Thermometer, AlertCir
 import { useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '@/src/lib/utils';
 import { useFirebase } from '../contexts/FirebaseContext';
+import { useActivePlot } from '../contexts/ActivePlotContext';
 import { db, collection, query, where, onSnapshot, handleFirestoreError, OperationType, addDoc, serverTimestamp, deleteDoc, doc, deleteField, batchDelete } from '../firebase';
 import { getPlantInfo } from '../constants/plants';
 import { Inhabitant, SpatialPlot, EventLog } from '../types';
@@ -16,6 +17,8 @@ import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 
 export default function Inventory() {
   const { user } = useFirebase();
+  const { activePlotId, activePlot } = useActivePlot();
+  const [scope, setScope] = useState<'plot' | 'all'>('plot');
   const navigate = useNavigate();
   const location = useLocation();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -315,9 +318,11 @@ export default function Inventory() {
 
   const filteredItems = sortedItems.filter(item => {
     const matchesFilter = filter === 'All' || (inventoryType === 'Plants' ? item.type === filter : item.category === filter);
-    const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          (item.latinName?.toLowerCase() || '').includes(searchQuery.toLowerCase());
-    return matchesFilter && matchesSearch;
+    // Active-plot scope for plants: unassigned plants stay visible; equipment is global.
+    const matchesPlot = inventoryType !== 'Plants' || scope === 'all' || !activePlotId || item.plotId === activePlotId || !item.plotId;
+    return matchesFilter && matchesSearch && matchesPlot;
   });
 
   const renderTable = () => (
@@ -450,6 +455,30 @@ export default function Inventory() {
           >
             Detailed records of your botanical inhabitants, tracking vitality from seedling to bloom.
           </motion.p>
+
+          {/* Plot scope toggle — plants follow the active plot */}
+          {inventoryType === 'Plants' && activePlot && (
+            <div className="flex bg-surface-variant/20 p-1 rounded-xl text-xs font-bold w-fit mt-6">
+              <button
+                onClick={() => setScope('plot')}
+                className={cn(
+                  "px-4 py-1.5 rounded-lg transition-all",
+                  scope === 'plot' ? "bg-white text-primary shadow-sm" : "text-on-surface-variant hover:text-primary"
+                )}
+              >
+                {activePlot.name}
+              </button>
+              <button
+                onClick={() => setScope('all')}
+                className={cn(
+                  "px-4 py-1.5 rounded-lg transition-all",
+                  scope === 'all' ? "bg-white text-primary shadow-sm" : "text-on-surface-variant hover:text-primary"
+                )}
+              >
+                All plots
+              </button>
+            </div>
+          )}
 
           {/* Inventory Type Toggle */}
           <div className="flex flex-col sm:flex-row gap-4 mt-8">

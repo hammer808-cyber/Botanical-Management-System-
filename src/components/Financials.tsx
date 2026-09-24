@@ -34,6 +34,7 @@ import { sendToInventorySync } from '../services/inventoryService';
 import CheckmarkCelebration from './CheckmarkCelebration';
 import { db, collection, query, where, onSnapshot, addDoc, deleteDoc, doc, handleFirestoreError, OperationType, serverTimestamp } from '../firebase';
 import { useFirebase } from '../contexts/FirebaseContext';
+import { useActivePlot } from '../contexts/ActivePlotContext';
 import { toast } from 'sonner';
 import { Inhabitant, SpatialPlot, Expense } from '../types';
 import { calculateCPY } from '../services/botanyService';
@@ -44,6 +45,8 @@ const COLORS = ['#154212', '#F27D26', '#E4E3E0', '#8E9299', '#5A5A40'];
 
 export default function Financials() {
   const { user } = useFirebase();
+  const { activePlotId, activePlot } = useActivePlot();
+  const [scope, setScope] = useState<'plot' | 'all'>('plot');
   const location = useLocation();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
@@ -68,6 +71,17 @@ export default function Financials() {
       }
     }
   }, [location, tasks]);
+
+  // Active-plot scope: expenses/tasks tagged 'General' or untagged are shared costs,
+  // visible under every plot. The 'All plots' toggle lifts the filter entirely.
+  const visibleExpenses = React.useMemo(() => {
+    if (scope === 'all' || !activePlotId) return expenses;
+    return expenses.filter(e => e.plotId === activePlotId || e.plotId === 'General' || !e.plotId);
+  }, [expenses, scope, activePlotId]);
+  const visibleTasks = React.useMemo(() => {
+    if (scope === 'all' || !activePlotId) return tasks;
+    return tasks.filter(t => !t.plotId || t.plotId === activePlotId);
+  }, [tasks, scope, activePlotId]);
 
   useEffect(() => {
     if (!user) return;
@@ -102,20 +116,20 @@ export default function Financials() {
 
   const expenseData = React.useMemo(() => {
     const categories: { [key: string]: number } = {};
-    expenses.forEach(exp => {
+    visibleExpenses.forEach(exp => {
       const cat = exp.category || 'Other';
       categories[cat] = (categories[cat] || 0) + (Number(exp.amount) || 0);
     });
     return Object.entries(categories).map(([name, value]) => ({ name, value }));
-  }, [expenses]);
+  }, [visibleExpenses]);
 
-  const totalExpenses = expenses.reduce((sum, exp) => sum + (Number(exp.amount) || 0), 0);
+  const totalExpenses = visibleExpenses.reduce((sum, exp) => sum + (Number(exp.amount) || 0), 0);
 
   const cpyData = React.useMemo(() => {
     return inhabitants
       .filter(inh => (inh.totalYield || 0) > 0)
       .map(inh => {
-        const inhabitantExpenses = expenses.filter(exp => exp.plotId === inh.plotId); // Simplified attribution
+        const inhabitantExpenses = visibleExpenses.filter(exp => exp.plotId === inh.plotId); // Simplified attribution
         const cpy = calculateCPY(inh, inhabitantExpenses);
         return {
           name: inh.name,
@@ -125,7 +139,7 @@ export default function Financials() {
         };
       })
       .sort((a, b) => a.cpy - b.cpy);
-  }, [inhabitants, expenses]);
+  }, [inhabitants, visibleExpenses]);
 
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -255,6 +269,30 @@ export default function Financials() {
         <div>
           <h1 className="text-4xl font-black tracking-tighter italic text-primary mb-2">Financials & Ops</h1>
           <p className="text-on-surface-variant font-medium">Track your garden's economy and daily rhythm.</p>
+          {activePlot && (
+            <div className="flex items-center gap-2 mt-3">
+              <div className="flex bg-surface-variant/20 p-1 rounded-xl text-xs font-bold">
+                <button
+                  onClick={() => setScope('plot')}
+                  className={cn(
+                    "px-4 py-1.5 rounded-lg transition-all",
+                    scope === 'plot' ? "bg-white text-primary shadow-sm" : "text-on-surface-variant hover:text-primary"
+                  )}
+                >
+                  {activePlot.name}
+                </button>
+                <button
+                  onClick={() => setScope('all')}
+                  className={cn(
+                    "px-4 py-1.5 rounded-lg transition-all",
+                    scope === 'all' ? "bg-white text-primary shadow-sm" : "text-on-surface-variant hover:text-primary"
+                  )}
+                >
+                  All plots
+                </button>
+              </div>
+            </div>
+          )}
         </div>
         <div className="flex bg-surface-variant/20 p-1 rounded-2xl backdrop-blur-sm">
           <button 
@@ -477,7 +515,7 @@ export default function Financials() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-outline-variant/10">
-                    {expenses.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(exp => (
+                    {[...visibleExpenses].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(exp => (
                       <tr key={exp.id} className="hover:bg-surface-variant/5 transition-colors group">
                         <td className="px-8 py-4 text-sm font-medium text-on-surface-variant">{format(new Date(exp.date), 'MMM dd, yyyy')}</td>
                         <td className="px-8 py-4 text-sm font-bold text-on-surface">{exp.item}</td>
@@ -498,7 +536,7 @@ export default function Financials() {
                         </td>
                       </tr>
                     ))}
-                    {expenses.length === 0 && (
+                    {visibleExpenses.length === 0 && (
                       <tr>
                         <td colSpan={6} className="px-8 py-12 text-center text-on-surface-variant/40 font-medium italic">
                           No expenses recorded yet.
@@ -518,12 +556,12 @@ export default function Financials() {
             <div className="bg-secondary text-white p-8 rounded-[2.5rem] shadow-2xl shadow-secondary/20">
               <p className="text-white/70 font-bold uppercase tracking-widest text-[10px] mb-2">Productivity</p>
               <h2 className="text-5xl font-black tracking-tighter italic mb-4">
-                {tasks.filter(t => t.completed).length}/{tasks.length}
+                {visibleTasks.filter(t => t.completed).length}/{visibleTasks.length}
               </h2>
               <div className="w-full bg-white/20 h-3 rounded-full overflow-hidden mb-6">
                 <motion.div 
                   initial={{ width: 0 }}
-                  animate={{ width: `${(tasks.filter(t => t.completed).length / tasks.length) * 100 || 0}%` }}
+                  animate={{ width: `${(visibleTasks.filter(t => t.completed).length / visibleTasks.length) * 100 || 0}%` }}
                   className="h-full bg-white"
                 />
               </div>
@@ -551,7 +589,7 @@ export default function Financials() {
           {/* Task List */}
           <div className="lg:col-span-2 space-y-4">
             <AnimatePresence mode="popLayout">
-              {tasks.length === 0 ? (
+              {visibleTasks.length === 0 ? (
                 <div className="bg-white p-12 rounded-[2.5rem] border border-dashed border-outline-variant flex flex-col items-center justify-center text-center">
                   <div className="w-16 h-16 rounded-full bg-surface-variant/20 flex items-center justify-center text-on-surface-variant/40 mb-4">
                     <LayoutList size={32} />
@@ -560,7 +598,7 @@ export default function Financials() {
                   <p className="text-on-surface-variant text-sm max-w-xs">Start by adding your daily or weekly gardening routines.</p>
                 </div>
               ) : (
-                tasks.map((task, index) => (
+                visibleTasks.map((task, index) => (
                   <motion.div
                     key={task.id}
                     layout

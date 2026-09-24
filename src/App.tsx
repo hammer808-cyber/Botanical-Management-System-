@@ -15,7 +15,9 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { FirebaseProvider, useFirebase } from './contexts/FirebaseContext';
 import { AccessibilityProvider } from './contexts/AccessibilityContext';
 import { ProgressProvider } from './contexts/ProgressContext';
+import { ActivePlotProvider } from './contexts/ActivePlotContext';
 import Login from './components/Login';
+import BedDetail from './components/BedDetail';
 
 import { Toaster } from 'sonner';
 
@@ -66,6 +68,11 @@ function AppContent() {
               <PlotDetail />
             </ErrorBoundary>
           } />
+          <Route path="/plots/:plotId/beds/:bedId" element={
+            <ErrorBoundary>
+              <BedDetail />
+            </ErrorBoundary>
+          } />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </Layout>
@@ -78,7 +85,9 @@ export default function App() {
     <FirebaseProvider>
       <AccessibilityProvider>
         <ProgressProvider>
-          <AppContent />
+          <ActivePlotProvider>
+            <AppContent />
+          </ActivePlotProvider>
         </ProgressProvider>
       </AccessibilityProvider>
     </FirebaseProvider>

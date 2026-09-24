@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Menu,
   Search,
@@ -9,19 +9,20 @@ import {
   Leaf,
   Flower2,
   ChevronRight,
+  ChevronDown,
   Sprout,
   Fence,
   DollarSign,
   Settings,
   HeartPulse,
-  LayoutDashboard
+  LayoutDashboard,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
 import { useFirebase } from '../contexts/FirebaseContext';
+import { useActivePlot } from '../contexts/ActivePlotContext';
 import GlobalActionHub from './GlobalActionHub';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
-import { db } from '../firebase';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -37,7 +38,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { path: '/', label: 'Home', icon: LayoutDashboard, exact: true },
-  { path: '/plots', label: 'My Garden', icon: Fence, matchPaths: ['/plots'] },
+  { path: '/plots', label: 'My Plots', icon: Fence, matchPaths: ['/plots'] },
   { path: '/plants', label: 'Plants', icon: Sprout, matchPaths: ['/plants', '/inventory', '/library', '/companions', '/plant'] },
   { path: '/care', label: 'Care', icon: HeartPulse, matchPaths: ['/care', '/treatment', '/weeding', '/calendar'] },
   { path: '/financials', label: 'Financials', icon: DollarSign },
@@ -47,18 +48,20 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function Layout({ children }: LayoutProps) {
   const { user, logout } = useFirebase();
+  const { plots, activePlotId, setActivePlotId, activePlot } = useActivePlot();
   const location = useLocation();
+  const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
-  const [plots, setPlots] = React.useState<any[]>([]);
+  const [isPlotMenuOpen, setIsPlotMenuOpen] = React.useState(false);
 
-  React.useEffect(() => {
-    if (!user) return;
-    const q = query(collection(db, 'spatial_plots'), where('ownerUid', '==', user.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setPlots(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-    return () => unsubscribe();
-  }, [user]);
+  const switchPlot = (id: string) => {
+    setActivePlotId(id);
+    setIsPlotMenuOpen(false);
+    // If we're on a plot-specific page, follow the switch there too.
+    if (/^\/plots\/[^/]+(\/beds\/[^/]+)?$/.test(location.pathname)) {
+      navigate(`/plots/${id}`);
+    }
+  };
 
   const isActive = (item: NavItem) => {
     if (item.exact) return location.pathname === item.path;
@@ -134,7 +137,7 @@ export default function Layout({ children }: LayoutProps) {
                 {NAV_ITEMS.map((item) => {
                   const active = isActive(item);
                   const Icon = item.icon;
-                  const isGarden = item.label === 'My Garden';
+                  const isGarden = item.label === 'My Plots';
 
                   return (
                     <div key={item.path} className="space-y-1">
@@ -159,7 +162,7 @@ export default function Layout({ children }: LayoutProps) {
                             <Link
                               key={plot.id}
                               to={`/plots/${plot.id}`}
-                              onClick={() => setIsSidebarOpen(false)}
+                              onClick={() => { setActivePlotId(plot.id); setIsSidebarOpen(false); }}
                               className={cn(
                                 "flex items-center gap-3 px-4 py-2 rounded-xl text-xs transition-all",
                                 location.pathname === `/plots/${plot.id}`
@@ -220,6 +223,57 @@ export default function Layout({ children }: LayoutProps) {
             <Menu size={24} />
           </button>
           <h1 className="font-headline font-black text-xl text-primary tracking-tighter italic">The Farm</h1>
+          {plots.length > 0 && (
+            <div className="relative">
+              <button
+                onClick={() => setIsPlotMenuOpen(v => !v)}
+                className="flex items-center gap-1.5 max-w-[38vw] px-3 py-1.5 rounded-full bg-primary/10 hover:bg-primary/15 text-primary text-sm font-bold transition-colors"
+                aria-label="Switch active plot"
+              >
+                <Fence size={15} className="shrink-0" />
+                <span className="truncate">{activePlot?.name || 'Select plot'}</span>
+                <ChevronDown size={14} className={cn("shrink-0 transition-transform", isPlotMenuOpen && "rotate-180")} />
+              </button>
+              <AnimatePresence>
+                {isPlotMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setIsPlotMenuOpen(false)} />
+                    <motion.div
+                      initial={{ opacity: 0, y: -6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute left-0 top-full mt-2 w-56 bg-white rounded-2xl shadow-xl border border-outline-variant/30 overflow-hidden z-50"
+                    >
+                      <p className="px-4 pt-3 pb-1 text-[10px] font-black uppercase tracking-widest text-on-surface-variant opacity-60">Active plot</p>
+                      {plots.map(plot => (
+                        <button
+                          key={plot.id}
+                          onClick={() => switchPlot(plot.id)}
+                          className={cn(
+                            "w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors",
+                            plot.id === activePlotId
+                              ? "bg-primary/10 text-primary font-bold"
+                              : "text-on-surface hover:bg-primary/5"
+                          )}
+                        >
+                          <span className="flex-1 truncate">{plot.name}</span>
+                          {plot.id === activePlotId && <Check size={16} className="shrink-0" />}
+                        </button>
+                      ))}
+                      <Link
+                        to="/plots"
+                        onClick={() => setIsPlotMenuOpen(false)}
+                        className="block px-4 py-2.5 text-sm font-bold text-primary hover:bg-primary/5 border-t border-outline-variant/30"
+                      >
+                        Manage plots…
+                      </Link>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-4">
           <button className="text-primary hover:bg-primary/5 p-2 rounded-full transition-colors" aria-label="Search">

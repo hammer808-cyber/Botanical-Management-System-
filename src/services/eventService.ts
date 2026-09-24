@@ -53,6 +53,7 @@ export async function logEvent({
       date: date,
       type: eventType,
       priority: 'Medium',
+      plotId: data.plotId || (targetType === 'SpatialPlot' ? targetId : null),
       sourceId: docRef.id,
       sourceCategory: category,
       createdAt: serverTimestamp(),

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useFirebase } from '../contexts/FirebaseContext';
+import { useActivePlot } from '../contexts/ActivePlotContext';
 import { db, collection, query, where, getDocs } from '../firebase';
 import { format, parseISO, isAfter, startOfDay, addDays, isBefore } from 'date-fns';
 import {
@@ -18,6 +19,7 @@ interface DashboardData {
 
 export default function GardenHub() {
   const { user, loading } = useFirebase();
+  const { setActivePlotId } = useActivePlot();
   const [data, setData] = React.useState<DashboardData | null>(null);
   const [dataLoading, setDataLoading] = React.useState(true);
 
@@ -185,6 +187,7 @@ export default function GardenHub() {
                   <Link
                     key={plot.id}
                     to={`/plots/${plot.id}`}
+                    onClick={() => setActivePlotId(plot.id)}
                     className="bg-white rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow"
                   >
                     <div className="flex items-center gap-3">

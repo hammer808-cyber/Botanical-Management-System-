@@ -20,6 +20,7 @@ import {
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import { useFirebase } from '../contexts/FirebaseContext';
+import { useActivePlot } from '../contexts/ActivePlotContext';
 import { db, collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, handleFirestoreError, OperationType, orderBy, getDocs } from '../firebase';
 import { cn } from '@/src/lib/utils';
 import { toast } from 'sonner';
@@ -32,6 +33,7 @@ type Recurrence = 'None' | 'Daily' | 'Weekly' | 'Bi-weekly';
 interface GardenEvent {
   id: string;
   ownerUid: string;
+  plotId?: string | null;
   title: string;
   description?: string;
   date: string; // YYYY-MM-DD
@@ -43,6 +45,7 @@ interface GardenEvent {
 
 export default function GardenCalendar() {
   const { user } = useFirebase();
+  const { activePlotId, activePlot } = useActivePlot();
   const [date, setDate] = useState<any>(new Date());
   const [events, setEvents] = useState<GardenEvent[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -99,6 +102,7 @@ export default function GardenCalendar() {
         await addDoc(collection(db, 'calendar_events'), {
           ...formData,
           ownerUid: user.uid,
+          plotId: activePlotId || null,
           createdAt: serverTimestamp()
         });
         toast.success('Event added to calendar');
@@ -197,10 +201,13 @@ export default function GardenCalendar() {
     setIsAddModalOpen(true);
   };
 
-  const filteredEvents = events
+  // Plot scope applied everywhere on this page (list, day view, tile dots).
+  const plotScopedEvents = events.filter(event => !event.plotId || !activePlotId || event.plotId === activePlotId);
+
+  const filteredEvents = plotScopedEvents
     .filter(event => {
       const matchesType = filterType === 'All' || event.type === filterType;
-      const matchesSearch = event.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      const matchesSearch = event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                            event.description?.toLowerCase().includes(searchQuery.toLowerCase());
       return matchesType && matchesSearch;
     })
@@ -213,11 +220,11 @@ export default function GardenCalendar() {
       return a.type.localeCompare(b.type);
     });
 
-  const selectedDateEvents = events.filter(event => isSameDay(parseISO(event.date), date));
+  const selectedDateEvents = plotScopedEvents.filter(event => isSameDay(parseISO(event.date), date));
 
   const tileContent = ({ date: tileDate, view }: { date: Date, view: string }) => {
     if (view === 'month') {
-      const dayEvents = events.filter(event => isSameDay(parseISO(event.date), tileDate));
+      const dayEvents = plotScopedEvents.filter(event => isSameDay(parseISO(event.date), tileDate));
       if (dayEvents.length > 0) {
         return (
           <div className="flex justify-center gap-0.5 mt-1">
