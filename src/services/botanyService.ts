@@ -142,16 +142,78 @@ export function getSeasonalCohort(inhabitant: Inhabitant): string {
  * 7. Spatial Recommendation Engine
  * Calculates Suitability Score (S) for a grid cell.
  */
+/**
+ * Normalizes a plant name for companion lookups.
+ * Quiz/database names carry variety suffixes ("Tomato 'Celebrity'",
+ * "Eggplant (Black Beauty)") and near-duplicates ("Strawberries",
+ * "Green Pepper") that all share the base plant's companions.
+ */
+const NAME_ALIASES: Record<string, string> = {
+  'Green Pepper': 'Pepper',
+  'Strawberries': 'Strawberry',
+  'Lemon Cucumber': 'Cucumber',
+};
+
+export function normalizePlantName(name: string): string {
+  const aliased = NAME_ALIASES[name] ?? name;
+  return aliased
+    .replace(/\s*\([^)]*\)/g, '') // (Black Beauty), (San Marzano)
+    .replace(/\s*'[^']*'/g, '') // 'Celebrity'
+    .trim();
+}
+
 export const BOTANICAL_RELATIONS: Record<string, { friends: string[]; enemies: string[] }> = {
-  'Tomato': { friends: ['Basil', 'Marigold', 'Carrot'], enemies: ['Fennel', 'Walnut', 'Potato'] },
-  'Basil': { friends: ['Tomato', 'Pepper'], enemies: [] },
-  'Marigold': { friends: ['Tomato', 'Pepper', 'Eggplant'], enemies: [] },
-  'Pepper': { friends: ['Basil', 'Marigold', 'Onion'], enemies: ['Fennel'] },
-  'Eggplant': { friends: ['Marigold', 'Beans'], enemies: ['Fennel'] },
-  'Beans': { friends: ['Corn', 'Cucumber', 'Eggplant'], enemies: ['Onion', 'Garlic'] },
-  'Corn': { friends: ['Beans', 'Squash', 'Cucumber'], enemies: [] },
-  'Squash': { friends: ['Corn', 'Beans', 'Marigold'], enemies: [] },
-  'Cucumber': { friends: ['Corn', 'Beans', 'Marigold'], enemies: ['Sage'] },
+  // --- Vegetables ---
+  'Tomato': { friends: ['Basil', 'Marigold', 'Carrot', 'Onion', 'Garlic', 'Lettuce', 'Parsley', 'Asparagus', 'Nasturtium', 'Borage'], enemies: ['Fennel', 'Walnut', 'Potato', 'Corn', 'Cabbage', 'Kale', 'Broccoli'] },
+  'Pepper': { friends: ['Basil', 'Marigold', 'Onion', 'Tomato', 'Oregano', 'Parsley'], enemies: ['Fennel', 'Kale'] },
+  'Eggplant': { friends: ['Marigold', 'Green Beans', 'Pepper', 'Thyme', 'Tarragon'], enemies: ['Fennel'] },
+  'Green Beans': { friends: ['Corn', 'Cucumber', 'Eggplant', 'Carrot', 'Radish', 'Potato', 'Strawberry', 'Cabbage', 'Rosemary', 'Oregano'], enemies: ['Onion', 'Garlic', 'Chives', 'Sunflower'] },
+  'Corn': { friends: ['Green Beans', 'Cucumber', 'Potato', 'Pea', 'Sunflower', 'Parsley', 'Zucchini'], enemies: ['Tomato'] },
+  'Cucumber': { friends: ['Corn', 'Green Beans', 'Marigold', 'Radish', 'Nasturtium', 'Sunflower', 'Pea', 'Lettuce', 'Dill', 'Chamomile'], enemies: ['Sage', 'Potato'] },
+  'Zucchini': { friends: ['Corn', 'Green Beans', 'Marigold', 'Nasturtium', 'Sunflower'], enemies: ['Potato'] },
+  'Gourd/Squash': { friends: ['Corn', 'Green Beans', 'Marigold', 'Nasturtium', 'Borage'], enemies: ['Potato'] },
+  'Onion': { friends: ['Carrot', 'Lettuce', 'Tomato', 'Pepper', 'Cabbage', 'Beet', 'Strawberry', 'Chard', 'Chamomile'], enemies: ['Green Beans', 'Pea', 'Asparagus'] },
+  'Garlic': { friends: ['Tomato', 'Carrot', 'Lettuce', 'Pepper', 'Cabbage', 'Beet', 'Chamomile'], enemies: ['Green Beans', 'Pea', 'Asparagus'] },
+  'Chives': { friends: ['Carrot', 'Tomato', 'Pepper', 'Cucumber'], enemies: ['Green Beans', 'Pea'] },
+  'Carrot': { friends: ['Onion', 'Garlic', 'Tomato', 'Lettuce', 'Rosemary', 'Pea', 'Sage', 'Chives', 'Lavender'], enemies: ['Dill'] },
+  'Lettuce': { friends: ['Carrot', 'Onion', 'Garlic', 'Radish', 'Strawberry', 'Cucumber', 'Sweet Alyssum'], enemies: ['Broccoli', 'Cabbage'] },
+  'Potato': { friends: ['Green Beans', 'Corn', 'Cabbage', 'Marigold', 'Sweet Alyssum'], enemies: ['Tomato', 'Cucumber', 'Sunflower', 'Zucchini', 'Gourd/Squash'] },
+  'Cabbage': { friends: ['Onion', 'Garlic', 'Dill', 'Rosemary', 'Nasturtium', 'Marigold', 'Potato', 'Beet', 'Chamomile', 'Thyme', 'Mint', 'Oregano', 'Borage'], enemies: ['Tomato', 'Strawberry', 'Green Beans', 'Lettuce'] },
+  'Broccoli': { friends: ['Onion', 'Garlic', 'Dill', 'Rosemary', 'Nasturtium', 'Potato', 'Beet', 'Chamomile', 'Thyme'], enemies: ['Tomato', 'Strawberry', 'Lettuce'] },
+  'Kale': { friends: ['Onion', 'Garlic', 'Dill', 'Potato', 'Beet', 'Nasturtium', 'Thyme'], enemies: ['Tomato', 'Strawberry', 'Pepper'] },
+  'Brussels Sprouts': { friends: ['Onion', 'Garlic', 'Dill', 'Potato', 'Nasturtium'], enemies: ['Tomato'] },
+  'Radish': { friends: ['Cucumber', 'Lettuce', 'Carrot', 'Pea', 'Nasturtium', 'Spinach'], enemies: [] },
+  'Pea': { friends: ['Carrot', 'Cucumber', 'Corn', 'Radish', 'Lettuce', 'Calendula'], enemies: ['Onion', 'Garlic', 'Chives'] },
+  'Spinach': { friends: ['Strawberry', 'Pea', 'Green Beans', 'Radish', 'Cilantro'], enemies: [] },
+  'Strawberry': { friends: ['Green Beans', 'Lettuce', 'Onion', 'Spinach', 'Thyme', 'Borage'], enemies: ['Cabbage', 'Broccoli', 'Kale'] },
+  'Beet': { friends: ['Onion', 'Garlic', 'Lettuce', 'Cabbage', 'Chard'], enemies: [] },
+  'Chard': { friends: ['Onion', 'Beet', 'Lettuce'], enemies: [] },
+  'Asparagus': { friends: ['Tomato', 'Parsley', 'Basil', 'Calendula'], enemies: ['Onion', 'Garlic'] },
+  // --- Herbs ---
+  'Basil': { friends: ['Tomato', 'Pepper', 'Asparagus'], enemies: ['Rue', 'Sage'] },
+  'Dill': { friends: ['Cabbage', 'Broccoli', 'Onion', 'Lettuce', 'Cucumber', 'Brussels Sprouts', 'Kale'], enemies: ['Carrot'] },
+  'Parsley': { friends: ['Tomato', 'Corn', 'Asparagus', 'Pepper'], enemies: [] },
+  'Rosemary': { friends: ['Carrot', 'Cabbage', 'Green Beans', 'Sage', 'Broccoli'], enemies: [] },
+  'Sage': { friends: ['Carrot', 'Cabbage', 'Rosemary', 'Strawberry'], enemies: ['Cucumber', 'Rue', 'Basil'] },
+  'Thyme': { friends: ['Eggplant', 'Strawberry', 'Cabbage', 'Broccoli', 'Kale'], enemies: [] },
+  'Oregano': { friends: ['Pepper', 'Green Beans', 'Cabbage'], enemies: [] },
+  'Cilantro': { friends: ['Tomato', 'Pepper', 'Spinach'], enemies: [] },
+  'Mint': { friends: ['Tomato', 'Cabbage'], enemies: [] },
+  'Chamomile': { friends: ['Cabbage', 'Onion', 'Cucumber', 'Broccoli'], enemies: [] },
+  'Borage': { friends: ['Tomato', 'Strawberry', 'Cabbage', 'Gourd/Squash'], enemies: [] },
+  'Lemon Balm': { friends: ['Tomato'], enemies: [] },
+  'Rue': { friends: [], enemies: ['Basil', 'Sage'] },
+  'Tarragon': { friends: ['Eggplant', 'Pepper'], enemies: [] },
+  'Lavender': { friends: ['Carrot'], enemies: [] },
+  // --- Flowers ---
+  'Marigold': { friends: ['Tomato', 'Pepper', 'Eggplant', 'Cucumber', 'Green Beans', 'Potato', 'Cabbage', 'Zucchini', 'Gourd/Squash'], enemies: [] },
+  'Nasturtium': { friends: ['Cucumber', 'Cabbage', 'Broccoli', 'Tomato', 'Zucchini', 'Radish', 'Gourd/Squash', 'Kale'], enemies: [] },
+  'Sunflower': { friends: ['Cucumber', 'Corn', 'Zucchini'], enemies: ['Potato', 'Green Beans'] },
+  'Calendula': { friends: ['Tomato', 'Asparagus', 'Pea'], enemies: [] },
+  'Sweet Alyssum': { friends: ['Lettuce', 'Potato'], enemies: [] },
+  'Zinnia': { friends: ['Tomato', 'Pepper'], enemies: [] },
+  'Cosmos': { friends: ['Tomato', 'Pepper'], enemies: [] },
+  'Bee Balm': { friends: ['Tomato', 'Pepper'], enemies: [] },
 };
 
 /**
@@ -167,11 +229,14 @@ export interface CompanionConflict {
 }
 
 function areEnemies(nameA: string, nameB: string): boolean {
-  const relA = BOTANICAL_RELATIONS[nameA];
-  const relB = BOTANICAL_RELATIONS[nameB];
+  const a = normalizePlantName(nameA);
+  const b = normalizePlantName(nameB);
+  if (a === b) return false;
+  const relA = BOTANICAL_RELATIONS[a];
+  const relB = BOTANICAL_RELATIONS[b];
   return (
-    (relA?.enemies.includes(nameB) ?? false) ||
-    (relB?.enemies.includes(nameA) ?? false)
+    (relA?.enemies.includes(b) ?? false) ||
+    (relB?.enemies.includes(a) ?? false)
   );
 }
 
@@ -225,11 +290,12 @@ export function calculateSuitabilityScore(
     !(p.gridPosition.x === x && p.gridPosition.y === y)
   );
   
-  const relations = BOTANICAL_RELATIONS[newPlant.name || ''] || { friends: [], enemies: [] };
+  const relations = BOTANICAL_RELATIONS[normalizePlantName(newPlant.name || '')] || { friends: [], enemies: [] };
   
   neighbors.forEach(neighbor => {
-    if (relations.friends.includes(neighbor.name)) score += 10;
-    if (relations.enemies.includes(neighbor.name)) score -= 20;
+    const neighborName = normalizePlantName(neighbor.name);
+    if (relations.friends.includes(neighborName)) score += 10;
+    if (relations.enemies.includes(neighborName)) score -= 20;
     
     // Family check (Allelopathy/Antagonism)
     if (neighbor.familyId === newPlant.familyId) score -= 5;
