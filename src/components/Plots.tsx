@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Trash2, DollarSign, TrendingUp, Calendar, Tag, ChevronRight, Activity, Map as MapIcon, Filter, Search, X, Check, ExternalLink, Edit3 } from 'lucide-react';
-import { db, collection, query, where, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, handleFirestoreError, OperationType, updateDoc, getDocs, batchDelete } from '../firebase';
+import { db, collection, query, where, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, handleFirestoreError, OperationType, updateDoc, getDocs, deleteField, batchDelete } from '../firebase';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { cn } from '@/src/lib/utils';
 import { toast } from 'sonner';
@@ -148,8 +148,8 @@ export default function Plots() {
       const inhabitantsSnap = await getDocs(inhabitantsQ);
       for (const d of inhabitantsSnap.docs) {
         await updateDoc(doc(db, 'inhabitants', d.id), {
-          plotId: null,
-          planterId: null,
+          plotId: deleteField(),
+          planterId: deleteField(),
           gridPosition: { x: 0, y: 0 }
         });
       }

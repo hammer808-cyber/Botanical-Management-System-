@@ -58,7 +58,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { logEvent } from '../services/eventService';
-import { db, collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, handleFirestoreError, OperationType, setDoc, batchDelete, runTransaction, serverTimestamp } from '../firebase';
+import { db, collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, handleFirestoreError, OperationType, setDoc, deleteField, batchDelete, runTransaction, serverTimestamp } from '../firebase';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { GoogleGenAI, Type } from "@google/genai";
 import { toast } from 'sonner';
@@ -513,7 +513,7 @@ export default function PlotDetail() {
             await updateDoc(doc(db, 'inhabitants', inhabitant.id), {
               plotId: plotId,
               gridPosition: { x: newX, y: newY },
-              planterId: null,
+              planterId: deleteField(),
               // First real placement: Pending -> Planted
               ...(inhabitant.status === 'Pending' ? { status: 'Planted' as const } : {}),
               updatedAt: serverTimestamp()
@@ -576,7 +576,7 @@ export default function PlotDetail() {
       for (const inhabitant of inhabitantsInPlanter) {
         await updateDoc(doc(db, 'inhabitants', inhabitant.id), {
           gridPosition: { x: 0, y: 0 },
-          planterId: null,
+          planterId: deleteField(),
           // Back to the rail: Planted -> Pending
           ...(inhabitant.status === 'Planted' ? { status: 'Pending' as const } : {}),
         });
@@ -694,8 +694,8 @@ export default function PlotDetail() {
       for (const d of inhabitantsSnap.docs) {
         const data = d.data();
         await updateDoc(doc(db, 'inhabitants', d.id), {
-          plotId: null,
-          planterId: null,
+          plotId: deleteField(),
+          planterId: deleteField(),
           gridPosition: { x: 0, y: 0 },
           // Back to unassigned: Planted -> Pending
           ...(data.status === 'Planted' ? { status: 'Pending' } : {})

@@ -394,7 +394,7 @@ service cloud.firestore {
         (!('vigorIndex' in data) || data.vigorIndex is number) &&
         (!('daysActive' in data) || data.daysActive is int) &&
         (!('progress' in data) || (data.progress is int && data.progress >= 0 && data.progress <= 100)) &&
-        (!('plotId' in data) || data.plotId is string) &&
+        (!('plotId' in data) || data.plotId == null || data.plotId is string) &&
         (!('image' in data) || isValidUrl(data.image)) &&
         (!('waterFreq' in data) || (data.waterFreq is string && data.waterFreq.size() < 100)) &&
         (!('sunExposure' in data) || (data.sunExposure is string && data.sunExposure.size() < 100)) &&

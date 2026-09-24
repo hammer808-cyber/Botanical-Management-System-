@@ -248,7 +248,7 @@ const FAQ_DATA = [
   }
 ];
 
-export default function Rules() {
+export default function Rules({ embedded = false }: { embedded?: boolean }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedCategory, setExpandedCategory] = useState<string | null>("Membership");
   const [expandedQuestions, setExpandedQuestions] = useState<Record<string, boolean>>({});
@@ -269,8 +269,9 @@ export default function Rules() {
   })).filter(cat => cat.questions.length > 0);
 
   return (
-    <div className="px-6 max-w-5xl mx-auto py-8 space-y-12 pb-32">
+    <div className={embedded ? "space-y-6" : "px-6 max-w-5xl mx-auto py-8 space-y-12 pb-32"}>
       {/* Editorial Header */}
+      {!embedded && (
       <section className="flex flex-col md:flex-row justify-between items-start gap-6 relative">
         <div className="absolute -top-10 -left-10 opacity-5 pointer-events-none">
           <BookOpen size={140} className="text-primary rotate-12" />
@@ -301,6 +302,7 @@ export default function Rules() {
           </motion.p>
         </div>
       </section>
+      )}
 
       {/* Search Bar */}
       <section className="relative">

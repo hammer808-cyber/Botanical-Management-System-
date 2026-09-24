@@ -28,6 +28,7 @@ import { cn } from '@/src/lib/utils';
 import { toast } from 'sonner';
 import { collection, query, where, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import Rules from './Rules';
 
 export default function Settings() {
   const { user, logout } = useFirebase();
@@ -310,6 +311,15 @@ export default function Settings() {
             </div>
           </section>
         ))}
+
+        {/* Garden Rules */}
+        <section className="space-y-6">
+          <div className="flex items-center gap-3 px-2">
+            <Shield className="text-primary" size={20} />
+            <h3 className="text-xs font-black uppercase tracking-[0.2em] text-outline">Garden Rules</h3>
+          </div>
+          <Rules embedded />
+        </section>
 
         {/* Danger Zone */}
         <section className="pt-8">

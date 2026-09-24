@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInAnonymously, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer, collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp, writeBatch, getDocs, orderBy, limit, getDoc, setDoc, runTransaction, increment } from 'firebase/firestore';
+import { getFirestore, doc, getDocFromServer, collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp, deleteField, writeBatch, getDocs, orderBy, limit, getDoc, setDoc, runTransaction, increment } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -87,5 +87,5 @@ export async function batchDelete(collectionName: string, ids: string[]) {
   }
 }
 
-export { signInAnonymously, signInWithPopup, signOut, onAuthStateChanged, doc, collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp, writeBatch, getDocs, orderBy, limit, getDoc, setDoc, ref, uploadBytes, getDownloadURL, runTransaction, increment };
+export { signInAnonymously, signInWithPopup, signOut, onAuthStateChanged, doc, collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp, deleteField, writeBatch, getDocs, orderBy, limit, getDoc, setDoc, ref, uploadBytes, getDownloadURL, runTransaction, increment };
 export type { User };

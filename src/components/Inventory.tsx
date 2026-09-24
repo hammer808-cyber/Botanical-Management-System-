@@ -4,7 +4,7 @@ import { Search, Filter, ArrowRight, Info, Leaf, Droplets, Thermometer, AlertCir
 import { useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '@/src/lib/utils';
 import { useFirebase } from '../contexts/FirebaseContext';
-import { db, collection, query, where, onSnapshot, handleFirestoreError, OperationType, addDoc, serverTimestamp, deleteDoc, doc, batchDelete } from '../firebase';
+import { db, collection, query, where, onSnapshot, handleFirestoreError, OperationType, addDoc, serverTimestamp, deleteDoc, doc, deleteField, batchDelete } from '../firebase';
 import { getPlantInfo } from '../constants/plants';
 import { Inhabitant, SpatialPlot, EventLog } from '../types';
 import { calculateVigorIndex } from '../lib/botany';
@@ -219,8 +219,8 @@ export default function Inventory() {
         nextWatering: format(addDays(new Date(), 2), 'yyyy-MM-dd'),
         tempRange: '65-85°F',
         gridPosition: { x: 0, y: 0 },
-        planterId: null,
-        plotId: null,
+        planterId: deleteField(),
+        plotId: deleteField(),
         createdAt: serverTimestamp()
       };
 

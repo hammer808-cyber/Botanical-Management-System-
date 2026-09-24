@@ -1,18 +1,13 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import GardenHub from './components/GardenHub';
-import Treatment from './components/Treatment';
-import Library from './components/Library';
+import PlantsPage from './components/PlantsPage';
+import CarePage from './components/CarePage';
 import Chat from './components/Chat';
 import PlantDetail from './components/PlantDetail';
-import Inventory from './components/Inventory';
-import Rules from './components/Rules';
-import Weeding from './components/Weeding';
 import Settings from './components/Settings';
-import GardenCalendar from './components/Calendar';
 import Plots from './components/Plots';
-import CompanionChecker from './components/CompanionChecker';
 import PlotDetail from './components/PlotDetail';
 import Financials from './components/Financials';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -50,16 +45,21 @@ function AppContent() {
       <Layout>
         <Routes>
           <Route path="/" element={<GardenHub />} />
-          <Route path="/inventory" element={<Inventory />} />
-          <Route path="/treatment" element={<Treatment />} />
-          <Route path="/library" element={<Library />} />
+          {/* Consolidated: Plants = My Plants + Discover + Companions */}
+          <Route path="/plants" element={<PlantsPage />} />
+          <Route path="/inventory" element={<PlantsPage initialTab="mine" />} />
+          <Route path="/library" element={<PlantsPage initialTab="discover" />} />
+          <Route path="/companions" element={<PlantsPage initialTab="companions" />} />
+          {/* Consolidated: Care = Treatments + Weeding + Schedule */}
+          <Route path="/care" element={<CarePage />} />
+          <Route path="/treatment" element={<CarePage initialTab="treatments" />} />
+          <Route path="/weeding" element={<CarePage initialTab="weeding" />} />
+          <Route path="/calendar" element={<CarePage initialTab="schedule" />} />
+          {/* Rules now lives inside Settings */}
+          <Route path="/rules" element={<Navigate to="/settings" replace />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="/plant/:id" element={<PlantDetail />} />
-          <Route path="/rules" element={<Rules />} />
-          <Route path="/weeding" element={<Weeding />} />
-          <Route path="/calendar" element={<GardenCalendar />} />
           <Route path="/plots" element={<Plots />} />
-          <Route path="/companions" element={<CompanionChecker />} />
           <Route path="/financials" element={<Financials />} />
           <Route path="/plots/:plotId" element={
             <ErrorBoundary>
