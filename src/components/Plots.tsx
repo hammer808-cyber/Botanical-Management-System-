@@ -7,6 +7,7 @@ import { cn } from '@/src/lib/utils';
 import { toast } from 'sonner';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
+import BedBuildQuiz from './BedBuildQuiz';
 
 import { 
   Inhabitant, 
@@ -523,145 +524,16 @@ export default function Plots() {
         </div>
       </div>
 
-      {/* Add Plot Modal */}
+      {/* Bed Build Quiz — replaces the old quick-add plot modal */}
       <AnimatePresence>
         {showAddPlot && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowAddPlot(false)}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative w-full max-w-lg bg-white rounded-[3rem] shadow-2xl overflow-hidden"
-            >
-              <div className="p-8 space-y-8">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-3xl font-headline font-black tracking-tight italic text-primary">New Plot</h3>
-                  <button onClick={() => setShowAddPlot(false)} className="p-2 hover:bg-primary/5 rounded-full text-on-surface-variant">
-                    <X size={24} />
-                  </button>
-                </div>
-
-                <form onSubmit={handleAddPlot} className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-4">Plot Name</label>
-                    <input 
-                      type="text"
-                      required
-                      value={newPlot.name}
-                      onChange={(e) => setNewPlot({ ...newPlot, name: e.target.value })}
-                      placeholder="e.g. North Greenhouse"
-                      className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-4">Description</label>
-                    <textarea 
-                      value={newPlot.description}
-                      onChange={(e) => setNewPlot({ ...newPlot, description: e.target.value })}
-                      placeholder="Optional details about this zone..."
-                      className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all min-h-[100px]"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-4">Plant Family</label>
-                      <input 
-                        type="text"
-                        value={newPlot.plantFamily}
-                        onChange={(e) => setNewPlot({ ...newPlot, plantFamily: e.target.value })}
-                        placeholder="e.g. Solanaceae"
-                        className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-4">Irrigation Zone</label>
-                      <input 
-                        type="text"
-                        value={newPlot.irrigationZone}
-                        onChange={(e) => setNewPlot({ ...newPlot, irrigationZone: e.target.value })}
-                        placeholder="e.g. Zone A"
-                        className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-4">Soil Type</label>
-                      <select 
-                        value={newPlot.soilType}
-                        onChange={(e) => setNewPlot({ ...newPlot, soilType: e.target.value })}
-                        className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all appearance-none"
-                      >
-                        <option>Loam</option>
-                        <option>Clay</option>
-                        <option>Sandy</option>
-                        <option>Silt</option>
-                        <option>Peat</option>
-                        <option>Chalky</option>
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-4">Health Status</label>
-                      <select 
-                        value={newPlot.healthStatus}
-                        onChange={(e) => setNewPlot({ ...newPlot, healthStatus: e.target.value as PlotHealth })}
-                        className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all appearance-none"
-                      >
-                        <option value="Stable">Stable</option>
-                        <option value="Thriving">Thriving</option>
-                        <option value="Stressed">Stressed</option>
-                        <option value="Dormant">Dormant</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-4">Notes</label>
-                    <textarea 
-                      value={newPlot.notes}
-                      onChange={(e) => setNewPlot({ ...newPlot, notes: e.target.value })}
-                      placeholder="Additional notes..."
-                      className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20 transition-all min-h-[80px]"
-                    />
-                  </div>
-
-                  <div className="flex gap-4">
-                    <button 
-                      type="button"
-                      onClick={() => setShowAddPlot(false)}
-                      className="flex-1 py-4 rounded-2xl font-black text-on-surface-variant hover:bg-surface-container-high transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button 
-                      type="submit"
-                      disabled={isSaving}
-                      className="flex-1 bg-primary text-white py-4 rounded-2xl font-black shadow-lg shadow-primary/20 hover:scale-[1.02] transition-all flex items-center justify-center gap-2"
-                    >
-                      {isSaving ? (
-                        <>
-                          <Check size={20} className="animate-bounce" />
-                          Created!
-                        </>
-                      ) : (
-                        'Create Plot'
-                      )}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </motion.div>
-          </div>
+          <BedBuildQuiz
+            onClose={() => setShowAddPlot(false)}
+            onComplete={(plotId) => {
+              setShowAddPlot(false);
+              navigate(`/plots/${plotId}`);
+            }}
+          />
         )}
       </AnimatePresence>
 

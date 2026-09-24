@@ -891,23 +891,8 @@ export default function PlotDetail() {
 
       <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Sidebar: Available Inhabitants & Stats */}
+          {/* Sidebar: Stats */}
           <div className="lg:col-span-1 space-y-6">
-            <div className="bg-white p-6 rounded-[2rem] border border-outline-variant/10 shadow-sm">
-              <h4 className="text-xs font-black uppercase tracking-[0.2em] text-on-surface-variant mb-4">Unmapped Inhabitants</h4>
-              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                {availableInhabitants.length === 0 ? (
-                  <p className="text-xs text-on-surface-variant italic py-4 text-center">All inhabitants are mapped or none available.</p>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    {availableInhabitants.map(inhabitant => (
-                      <DraggablePlantIcon key={inhabitant.id} inhabitant={inhabitant} />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
             <div className="bg-primary/5 p-6 rounded-[2rem] border border-primary/10">
               <h4 className="text-xs font-black uppercase tracking-[0.2em] text-primary mb-4">Plot Inventory</h4>
               <div className="space-y-3">
@@ -981,6 +966,29 @@ export default function PlotDetail() {
 
           {/* Main Grid Editor */}
           <div className="lg:col-span-3 space-y-4">
+            {/* Plant rail — quiz picks land here, drag them onto the bed */}
+            <div className="bg-white p-4 rounded-3xl border border-outline-variant/10 shadow-sm">
+              <div className="flex items-center justify-between mb-3 px-2">
+                <h4 className="text-xs font-black uppercase tracking-[0.2em] text-on-surface-variant">
+                  Your plants <span className="text-primary">— drag onto the bed</span>
+                </h4>
+                <span className="text-[10px] font-bold text-on-surface-variant">
+                  {availableInhabitants.length} to place
+                </span>
+              </div>
+              {availableInhabitants.length === 0 ? (
+                <p className="text-xs text-on-surface-variant italic px-2 py-3 text-center">
+                  All plants are placed. Pick more with the bed quiz or add them from the Library.
+                </p>
+              ) : (
+                <div className="flex gap-3 overflow-x-auto pb-2 pt-1 px-1 snap-x custom-scrollbar">
+                  {availableInhabitants.map(inhabitant => (
+                    <DraggablePlantIcon key={inhabitant.id} inhabitant={inhabitant} compact />
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="flex items-center justify-between bg-white p-4 rounded-3xl border border-outline-variant/10 shadow-sm">
               <div className="flex items-center gap-2">
                 <Filter size={16} className="text-primary" />
@@ -1871,7 +1879,7 @@ export default function PlotDetail() {
   );
 }
 
-function DraggablePlantIcon({ inhabitant }: { inhabitant: Inhabitant }) {
+function DraggablePlantIcon({ inhabitant, compact = false }: { inhabitant: Inhabitant; compact?: boolean }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: inhabitant.id,
     data: { type: 'plant' }
@@ -1883,6 +1891,37 @@ function DraggablePlantIcon({ inhabitant }: { inhabitant: Inhabitant }) {
 
   const urgency = inhabitant.pullDate ? calculateUrgencyIndex(inhabitant.pullDate) : null;
   const cohort = getSeasonalCohort(inhabitant);
+
+  const stopProp = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    listeners?.onPointerDown(e);
+  };
+
+  if (compact) {
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        {...listeners}
+        {...attributes}
+        onPointerDown={stopProp}
+        className={cn(
+          "shrink-0 snap-start w-20 flex flex-col items-center gap-1.5 cursor-grab active:cursor-grabbing botanical-tooltip",
+          isDragging && "opacity-50"
+        )}
+        data-tooltip={`${inhabitant.name} (${cohort})`}
+      >
+        <div className="w-14 h-14 rounded-2xl overflow-hidden border-2 border-primary/30 bg-primary/5 shadow-sm flex items-center justify-center">
+          {inhabitant.image ? (
+            <img src={inhabitant.image} alt={inhabitant.name} className="w-full h-full object-cover pointer-events-none" referrerPolicy="no-referrer" />
+          ) : (
+            <Leaf size={22} className="text-primary" />
+          )}
+        </div>
+        <span className="text-[10px] font-bold text-center leading-tight line-clamp-2">{inhabitant.name}</span>
+      </div>
+    );
+  }
 
   return (
     <div 
