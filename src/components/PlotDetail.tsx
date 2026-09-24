@@ -679,17 +679,18 @@ export default function PlotDetail() {
   const [isDeletingConfirmed, setIsDeletingConfirmed] = useState(false);
 
   const handleDeletePlot = async () => {
-    if (!plotId || !itemToDelete || itemToDelete.type !== 'plot') return;
+    if (!plotId || !itemToDelete || itemToDelete.type !== 'plot' || !user) return;
+    const uid = user.uid;
     setIsDeletingConfirmed(true);
     
     try {
       // 1. Get planters
-      const plantersQ = query(collection(db, 'planters'), where('plotId', '==', plotId));
+      const plantersQ = query(collection(db, 'planters'), where('plotId', '==', plotId), where('ownerUid', '==', uid));
       const plantersSnap = await getDocs(plantersQ);
       const planterIds = plantersSnap.docs.map(d => d.id);
 
       // 2. Unassign inhabitants
-      const inhabitantsQ = query(collection(db, 'inhabitants'), where('plotId', '==', plotId));
+      const inhabitantsQ = query(collection(db, 'inhabitants'), where('plotId', '==', plotId), where('ownerUid', '==', uid));
       const inhabitantsSnap = await getDocs(inhabitantsQ);
       for (const d of inhabitantsSnap.docs) {
         const data = d.data();

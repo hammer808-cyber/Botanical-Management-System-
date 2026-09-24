@@ -134,20 +134,21 @@ export default function Plots() {
   const [isDeletingConfirmed, setIsDeletingConfirmed] = useState(false);
 
   const handleDeletePlot = async () => {
-    if (!plotToDelete) return;
+    if (!plotToDelete || !user) return;
     const id = plotToDelete;
+    const uid = user.uid;
     setIsDeletingConfirmed(true);
     let step = 'init';
     try {
       // 1. Get planters
       step = 'read-planters';
-      const plantersQ = query(collection(db, 'planters'), where('plotId', '==', id));
+      const plantersQ = query(collection(db, 'planters'), where('plotId', '==', id), where('ownerUid', '==', uid));
       const plantersSnap = await getDocs(plantersQ);
       const planterIds = plantersSnap.docs.map(d => d.id);
 
       // 2. Unassign inhabitants
       step = 'read-inhabitants';
-      const inhabitantsQ = query(collection(db, 'inhabitants'), where('plotId', '==', id));
+      const inhabitantsQ = query(collection(db, 'inhabitants'), where('plotId', '==', id), where('ownerUid', '==', uid));
       const inhabitantsSnap = await getDocs(inhabitantsQ);
       step = 'update-inhabitants';
       for (const d of inhabitantsSnap.docs) {
@@ -160,7 +161,7 @@ export default function Plots() {
 
       // 3. Delete expenses
       step = 'delete-expenses';
-      const expensesQ = query(collection(db, 'expenses'), where('plotId', '==', id));
+      const expensesQ = query(collection(db, 'expenses'), where('plotId', '==', id), where('ownerUid', '==', uid));
       const expensesSnap = await getDocs(expensesQ);
       for (const d of expensesSnap.docs) {
         await deleteDoc(doc(db, 'expenses', d.id));
@@ -168,7 +169,7 @@ export default function Plots() {
 
       // 4. Delete event logs
       step = 'delete-event-logs';
-      const logsQ = query(collection(db, 'event_logs'), where('targetId', '==', id));
+      const logsQ = query(collection(db, 'event_logs'), where('targetId', '==', id), where('ownerUid', '==', uid));
       const logsSnap = await getDocs(logsQ);
       for (const d of logsSnap.docs) {
         await deleteDoc(doc(db, 'event_logs', d.id));
@@ -176,7 +177,7 @@ export default function Plots() {
 
       // 5. Delete tasks
       step = 'delete-tasks';
-      const tasksQ = query(collection(db, 'tasks'), where('plotId', '==', id));
+      const tasksQ = query(collection(db, 'tasks'), where('plotId', '==', id), where('ownerUid', '==', uid));
       const tasksSnap = await getDocs(tasksQ);
       for (const d of tasksSnap.docs) {
         await deleteDoc(doc(db, 'tasks', d.id));
@@ -184,7 +185,7 @@ export default function Plots() {
 
       // 6. Delete calendar events (if they have plotId)
       step = 'delete-events';
-      const eventsQ = query(collection(db, 'calendar_events'), where('plotId', '==', id));
+      const eventsQ = query(collection(db, 'calendar_events'), where('plotId', '==', id), where('ownerUid', '==', uid));
       const eventsSnap = await getDocs(eventsQ);
       for (const d of eventsSnap.docs) {
         await deleteDoc(doc(db, 'calendar_events', d.id));
