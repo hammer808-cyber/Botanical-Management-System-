@@ -1235,6 +1235,16 @@ export default function PlotDetail() {
           setSelectedPlant(null);
           setIsAddingLog(true);
         }}
+        onLogUnknown={(labels) => {
+          if (selectedPlant) {
+            setNewLog({
+              action: 'Pest Control',
+              notes: `${selectedPlant.name} — Unknown issue, not in library yet. Symptoms seen: ${labels.length > 0 ? labels.join(', ') : 'none noted'}.`,
+            });
+          }
+          setSelectedPlant(null);
+          setIsAddingLog(true);
+        }}
       />
 
       {/* Elite Botanical Insights Section */}

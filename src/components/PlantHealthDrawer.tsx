@@ -11,7 +11,7 @@ import {
   type PlantThreat,
   type ThreatMatch,
 } from '../constants/threats';
-import ThreatCard from './ThreatCard';
+import ThreatCard, { ThreatPhoto } from './ThreatCard';
 
 type Step = 'start' | 'symptoms' | 'matches' | 'solution';
 
@@ -51,20 +51,26 @@ export default function PlantHealthDrawer({
   plant,
   onClose,
   onLogTreatment,
+  onLogUnknown,
 }: {
   plant: Inhabitant | null;
   onClose: () => void;
   onLogTreatment: (threat: PlantThreat) => void;
+  onLogUnknown: (symptomLabels: string[]) => void;
 }) {
   const [step, setStep] = useState<Step>('start');
   const [picked, setPicked] = useState<Set<SymptomTag>>(new Set());
   const [match, setMatch] = useState<ThreatMatch | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
   // Reset the flow whenever a different plant is opened
   useEffect(() => {
     setStep('start');
     setPicked(new Set());
     setMatch(null);
+    setConfirmed(false);
+    setDismissed(new Set());
   }, [plant?.id]);
 
   const toggleOption = (tags: SymptomTag[]) => {
@@ -76,8 +82,29 @@ export default function PlantHealthDrawer({
     });
   };
 
-  const matches = plant ? identifyThreats(plant.name, [...picked]) : [];
+  const matches = plant
+    ? identifyThreats(plant.name, [...picked]).filter((m) => !dismissed.has(m.threat.id))
+    : [];
   const allThreats = plant ? getThreatsForPlant(plant.name) : [];
+
+  const openMatch = (m: ThreatMatch) => {
+    setMatch(m);
+    setConfirmed(false);
+    setStep('solution');
+  };
+
+  const rejectMatch = () => {
+    if (match) {
+      setDismissed((prev) => new Set(prev).add(match.threat.id));
+    }
+    setMatch(null);
+    setConfirmed(false);
+    setStep('matches');
+  };
+
+  const symptomLabels = [...new Set(
+    [...picked].map((t) => SYMPTOM_OPTIONS.find((o) => o.tags.includes(t))?.label).filter(Boolean) as string[]
+  )];
 
   return (
     <AnimatePresence>
@@ -191,22 +218,41 @@ export default function PlantHealthDrawer({
                           <>No matches <span className="font-medium text-stone-500">— try fewer symptoms, or browse everything below</span></>
                         )}
                       </p>
-                      {matches.map(({ threat, matchedTags, score }) => (
+                      {matches.length === 0 && (
+                        <div className="bg-amber-50 rounded-2xl border-2 border-dashed border-amber-300 p-5 text-center space-y-2.5">
+                          <p className="text-2xl">🔍</p>
+                          <p className="text-sm font-black text-stone-900">
+                            {dismissed.size > 0 ? 'Ran out of suspects' : "Can't find it?"}
+                          </p>
+                          <p className="text-xs font-medium text-stone-600">
+                            {dismissed.size > 0
+                              ? 'You ruled out every match — it may not be in the library yet.'
+                              : 'Nothing in the library fits those symptoms yet — log what you see so it\'s on record.'}
+                          </p>
+                          <button
+                            onClick={() => onLogUnknown(symptomLabels)}
+                            className="w-full bg-stone-900 hover:bg-stone-800 active:scale-[0.98] transition-all text-white text-sm font-black py-3 rounded-2xl"
+                          >
+                            Log as unknown issue
+                          </button>
+                        </div>
+                      )}
+                      {matches.map((m) => (
                         <button
-                          key={threat.id}
-                          onClick={() => { setMatch({ threat, matchedTags, score }); setStep('solution'); }}
+                          key={m.threat.id}
+                          onClick={() => openMatch(m)}
                           className="w-full flex items-center gap-3 bg-white rounded-2xl border border-stone-200 p-3.5 text-left hover:shadow-md hover:border-primary/40 active:scale-[0.99] transition-all"
                         >
-                          <span className="text-3xl shrink-0">{threat.icon}</span>
+                          <ThreatPhoto threat={m.threat} />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <p className="text-sm font-black text-stone-900">{threat.name}</p>
-                              <span className={cn('text-[9px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-full', severityStyles[threat.severity])}>
-                                {threat.severity}
+                              <p className="text-sm font-black text-stone-900">{m.threat.name}</p>
+                              <span className={cn('text-[9px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-full', severityStyles[m.threat.severity])}>
+                                {m.threat.severity}
                               </span>
                             </div>
                             <p className="text-[11px] font-medium text-stone-500 mt-0.5">
-                              Matches: {matchedTags.map((t) => SYMPTOM_OPTIONS.find((o) => o.tags.includes(t))?.label.toLowerCase()).filter(Boolean).join(', ')}
+                              Matches: {m.matchedTags.map((t) => SYMPTOM_OPTIONS.find((o) => o.tags.includes(t))?.label.toLowerCase()).filter(Boolean).join(', ')}
                             </p>
                           </div>
                           <ChevronRight size={18} className="text-stone-400 shrink-0" />
@@ -264,34 +310,67 @@ export default function PlantHealthDrawer({
                     </div>
                   </div>
 
-                  <div className="bg-emerald-50 border-2 border-emerald-200 rounded-2xl p-4">
-                    <p className="text-xs font-black uppercase tracking-wider text-emerald-800 mb-3">Do this now</p>
-                    <ol className="space-y-3">
-                      {match.threat.quickFix.map((fix, i) => (
-                        <li key={i} className="flex gap-3 items-start">
-                          <span className="shrink-0 w-7 h-7 rounded-full bg-emerald-600 text-white text-sm font-black flex items-center justify-center">
-                            {i + 1}
-                          </span>
-                          <p className="text-sm font-bold text-emerald-950 leading-snug pt-0.5">{fix}</p>
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
+                  <ThreatPhoto threat={match.threat} size="large" />
+
+                  {!confirmed ? (
+                    <div className="bg-white rounded-2xl border-2 border-stone-200 p-4 text-center space-y-3">
+                      <p className="text-sm font-black text-stone-900">Does this look like your plant's problem?</p>
+                      <p className="text-xs font-medium text-stone-500">Compare the photo with what you see out there.</p>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <button
+                          onClick={() => setConfirmed(true)}
+                          className="bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] transition-all text-white text-sm font-black py-3 rounded-2xl"
+                        >
+                          Yes, that's it
+                        </button>
+                        <button
+                          onClick={rejectMatch}
+                          className="bg-stone-100 hover:bg-stone-200 active:scale-[0.98] transition-all text-stone-700 text-sm font-black py-3 rounded-2xl"
+                        >
+                          No, not quite
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="bg-emerald-50 border-2 border-emerald-200 rounded-2xl p-4">
+                        <p className="text-xs font-black uppercase tracking-wider text-emerald-800 mb-3">Do this now</p>
+                        <ol className="space-y-3">
+                          {match.threat.quickFix.map((fix, i) => (
+                            <li key={i} className="flex gap-3 items-start">
+                              <span className="shrink-0 w-7 h-7 rounded-full bg-emerald-600 text-white text-sm font-black flex items-center justify-center">
+                                {i + 1}
+                              </span>
+                              <p className="text-sm font-bold text-emerald-950 leading-snug pt-0.5">{fix}</p>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                      <button
+                        onClick={rejectMatch}
+                        className="w-full text-center text-xs font-bold text-stone-500 underline underline-offset-2 py-1"
+                      >
+                        Actually, this isn't it — try the other suspects
+                      </button>
+                    </>
+                  )}
 
                   <div>
                     <p className="text-[10px] font-black uppercase tracking-wider text-stone-500 mb-2">Full details</p>
                     <ThreatCard threat={match.threat} compact />
                   </div>
                 </div>
-                <div className="p-4 border-t border-stone-200 bg-white/80 backdrop-blur shrink-0">
-                  <button
-                    onClick={() => onLogTreatment(match.threat)}
-                    className="w-full flex items-center justify-center gap-2 bg-primary text-white font-bold text-sm py-3.5 rounded-2xl shadow-lg active:scale-[0.98] transition-transform"
-                  >
-                    <ClipboardList size={16} />
-                    Log this treatment
-                  </button>
-                </div>
+                {confirmed && (
+                  <div className="p-4 border-t border-stone-200 bg-white/80 backdrop-blur shrink-0">
+                    <button
+                      onClick={() => onLogTreatment(match.threat)}
+                      className="w-full flex items-center justify-center gap-2 bg-primary text-white font-bold text-sm py-3.5 rounded-2xl shadow-lg active:scale-[0.98] transition-transform"
+                    >
+                      <ClipboardList size={16} />
+                      Log this treatment
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </motion.div>

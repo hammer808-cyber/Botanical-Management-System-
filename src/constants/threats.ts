@@ -57,6 +57,10 @@ export interface PlantThreat {
   organicTreatment: string[];
   prevention: string[];
   severity: ThreatSeverity;
+  /** Local reference photo path, e.g. "/threats/hornworm.jpg" */
+  image?: string;
+  /** Photo credit / source */
+  credit?: string;
 }
 
 export const THREAT_LIBRARY: PlantThreat[] = [

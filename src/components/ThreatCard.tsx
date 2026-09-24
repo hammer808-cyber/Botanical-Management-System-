@@ -46,6 +46,40 @@ function ThreatBody({ threat }: { threat: PlantThreat }) {
   );
 }
 
+export function ThreatPhoto({ threat, size = 'thumb' }: { threat: PlantThreat; size?: 'thumb' | 'large' }) {
+  const [failed, setFailed] = useState(false);
+  if (!threat.image || failed) return null;
+
+  if (size === 'large') {
+    return (
+      <figure className="overflow-hidden rounded-2xl border border-stone-200 bg-stone-100">
+        <img
+          src={threat.image}
+          alt={`${threat.name} reference photo`}
+          loading="lazy"
+          onError={() => setFailed(true)}
+          className="w-full aspect-[4/3] object-cover"
+        />
+        {threat.credit && (
+          <figcaption className="px-3 py-1.5 text-[10px] font-medium text-stone-500 bg-white">
+            Photo: {threat.credit}
+          </figcaption>
+        )}
+      </figure>
+    );
+  }
+
+  return (
+    <img
+      src={threat.image}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="w-14 h-14 rounded-xl object-cover shrink-0 border border-stone-200 bg-stone-100"
+    />
+  );
+}
+
 export default function ThreatCard({
   threat,
   affectedPlants,
@@ -64,7 +98,8 @@ export default function ThreatCard({
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center gap-3 p-3 text-left hover:bg-stone-50 transition-colors"
       >
-        <span className="text-2xl shrink-0">{threat.icon}</span>
+        <ThreatPhoto threat={threat} />
+        {!threat.image && <span className="text-2xl shrink-0">{threat.icon}</span>}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
             <p className="text-sm font-bold text-stone-800">{threat.name}</p>
