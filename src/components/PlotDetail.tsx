@@ -65,6 +65,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { toast } from 'sonner';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import PlotEditForm, { PlotEditData } from './PlotEditForm';
+import BedEditModal from './BedEditModal';
 import { isPlanted, countPlanted, countWaiting } from '../lib/plotStats';
 import { recalculateVigor, refreshStaleVigor, averageVigor } from '../lib/vigor';
 import WeedWarriorWizard from './WeedWarriorWizard';
@@ -686,37 +687,6 @@ export default function PlotDetail() {
         // Land where the pointer actually is inside the bed, not the corner.
         await commitPlantPlacement(inhabitant, target.bed, target.pos);
       }
-    }
-  };
-
-  const updatePlanter = async (id: string, updates: Partial<Planter>) => {
-    try {
-      await updateDoc(doc(db, 'planters', id), updates);
-      // If the bed was resized/moved, pull its riders back inside the new footprint
-      const planter = planters.find(p => p.id === id);
-      if (planter && (updates.size || updates.gridPosition)) {
-        const size = updates.size || planter.size;
-        const pos = updates.gridPosition || planter.gridPosition;
-        const riders = inhabitants.filter(p =>
-          p.planterId === id ||
-          (!p.planterId && p.gridPosition &&
-            p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w &&
-            p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h)
-        );
-        for (const r of riders) {
-          const rx = Math.max(pos.x, Math.min(pos.x + size.w - 1, r.gridPosition?.x || 0));
-          const ry = Math.max(pos.y, Math.min(pos.y + size.h - 1, r.gridPosition?.y || 0));
-          if (rx !== r.gridPosition?.x || ry !== r.gridPosition?.y || r.planterId !== id) {
-            await updateDoc(doc(db, 'inhabitants', r.id), {
-              gridPosition: { x: rx, y: ry },
-              planterId: id,
-            });
-          }
-        }
-      }
-      toast.success('Planter updated');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `planters/${id}`);
     }
   };
 
@@ -2134,106 +2104,14 @@ export default function PlotDetail() {
       {/* Planter Editor Modal */}
       <AnimatePresence>
         {editingPlanter && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-[2.5rem] w-full max-w-md overflow-hidden shadow-2xl"
-            >
-              <div className="p-8 space-y-8">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-2xl font-black font-headline tracking-tight">Bed Settings</h3>
-                  <button onClick={() => setEditingPlanter(null)} className="p-2 hover:bg-stone-100 rounded-full transition-colors"><X /></button>
-                </div>
-
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Bed Name</label>
-                    <input 
-                      type="text" 
-                      value={editingPlanter.name}
-                      onChange={(e) => setEditingPlanter({...editingPlanter, name: e.target.value})}
-                      className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Width (Cells)</label>
-                      <input 
-                        type="number" 
-                        min="1"
-                        max={COLS - editingPlanter.gridPosition.x}
-                        value={editingPlanter.size.w}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value) || 1;
-                          const maxW = COLS - editingPlanter.gridPosition.x;
-                          setEditingPlanter({...editingPlanter, size: { ...editingPlanter.size, w: Math.min(Math.max(1, val), maxW) }});
-                        }}
-                        className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Height (Cells)</label>
-                      <input 
-                        type="number" 
-                        min="1"
-                        max={ROWS - editingPlanter.gridPosition.y}
-                        value={editingPlanter.size.h}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value) || 1;
-                          const maxH = ROWS - editingPlanter.gridPosition.y;
-                          setEditingPlanter({...editingPlanter, size: { ...editingPlanter.size, h: Math.min(Math.max(1, val), maxH) }});
-                        }}
-                        className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Bed Color</label>
-                    <div className="flex flex-wrap gap-2">
-                      {['#4CAF50', '#8B4513', '#795548', '#607D8B', '#3F51B5', '#E91E63'].map(color => (
-                        <button 
-                          key={color}
-                          onClick={() => setEditingPlanter({...editingPlanter, color})}
-                          className={cn(
-                            "w-10 h-10 rounded-full border-4 transition-all",
-                            editingPlanter.color === color ? "border-primary scale-110" : "border-transparent"
-                          )}
-                          style={{ backgroundColor: color }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-4">
-                  <button 
-                    onClick={() => updatePlanter(editingPlanter.id, editingPlanter)}
-                    disabled={isSaving}
-                    className="flex-1 bg-primary text-white font-black py-4 rounded-2xl hover:shadow-lg transition-all flex items-center justify-center gap-2"
-                  >
-                    {isSaving ? (
-                      <>
-                        <Check size={20} className="animate-bounce" />
-                        Saved!
-                      </>
-                    ) : (
-                      'Save Changes'
-                    )}
-                  </button>
-                  <button 
-                    onClick={() => { setEditingPlanter(null); setItemToDelete({ id: editingPlanter.id, type: 'planter' }); setShowDeleteModal(true); }}
-                    className="p-4 bg-red-50 text-red-500 rounded-2xl hover:bg-red-100 transition-colors"
-                  >
-                    <Trash2 size={24} />
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
+          <BedEditModal
+            bed={editingPlanter}
+            cols={COLS}
+            rows={ROWS}
+            otherBeds={planters.filter((b) => b.id !== editingPlanter.id)}
+            plants={inhabitants}
+            onClose={() => setEditingPlanter(null)}
+          />
         )}
       </AnimatePresence>
 

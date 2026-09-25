@@ -5,10 +5,11 @@ import { db } from '../firebase';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { averageVigor } from '../lib/vigor';
 import { useActivePlot } from '../contexts/ActivePlotContext';
-import { ArrowLeft, Leaf, Ruler, Activity, Plus, Stethoscope } from 'lucide-react';
+import { ArrowLeft, Leaf, Ruler, Activity, Plus, Stethoscope, Pencil } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { AnimatePresence } from 'motion/react';
 import HealthCheckWizard from './HealthCheckWizard';
+import BedEditModal, { BedLike } from './BedEditModal';
 import PlantImage from './PlantImage';
 import type { Inhabitant } from '../types';
 
@@ -39,6 +40,9 @@ export default function BedDetail() {
   const [plants, setPlants] = useState<Inhabitant[]>([]);
   const [loading, setLoading] = useState(true);
   const [checkPlant, setCheckPlant] = useState<Inhabitant | null>(null);
+  const [otherBeds, setOtherBeds] = useState<BedLike[]>([]);
+  const [gridDims, setGridDims] = useState({ cols: 30, rows: 20 });
+  const [showEditor, setShowEditor] = useState(false);
 
   useEffect(() => {
     if (plotId) setActivePlotId(plotId);
@@ -47,8 +51,23 @@ export default function BedDetail() {
   useEffect(() => {
     if (!user || !plotId || !bedId) return;
     const unsubPlot = onSnapshot(doc(db, 'spatial_plots', plotId), (snap) => {
-      if (snap.exists()) setPlotName((snap.data().name as string) || 'Plot');
+      if (snap.exists()) {
+        const data = snap.data();
+        setPlotName((data.name as string) || 'Plot');
+        const gc = data.gridConfig as { cols?: number; rows?: number } | undefined;
+        if (gc) setGridDims({ cols: gc.cols || 30, rows: gc.rows || 20 });
+      }
     });
+    const unsubBeds = onSnapshot(
+      query(collection(db, 'planters'), where('ownerUid', '==', user.uid), where('plotId', '==', plotId)),
+      (snap) => {
+        setOtherBeds(
+          snap.docs
+            .filter((d) => d.id !== bedId)
+            .map((d) => ({ id: d.id, ...(d.data() as Omit<BedLike, 'id'>) }))
+        );
+      }
+    );
     const unsubBed = onSnapshot(doc(db, 'planters', bedId), (snap) => {
       if (snap.exists()) {
         const data = snap.data();
@@ -73,6 +92,7 @@ export default function BedDetail() {
     return () => {
       unsubPlot();
       unsubBed();
+      unsubBeds();
       unsubPlants();
     };
   }, [user, plotId, bedId]);
@@ -145,6 +165,13 @@ export default function BedDetail() {
           <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Bed vigor</p>
           <p className="font-black text-2xl">{bedVigor === null ? '—' : `${bedVigor}%`}</p>
         </div>
+        <button
+          onClick={() => setShowEditor(true)}
+          className="p-3 rounded-2xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-colors touch-target"
+          aria-label={`Edit ${bed.name || 'bed'}`}
+        >
+          <Pencil size={18} />
+        </button>
       </div>
 
       {/* Focused single-bed viewfinder — only this bed, nothing else */}
@@ -253,6 +280,19 @@ export default function BedDetail() {
           </div>
         )}
       </div>
+
+      <AnimatePresence>
+        {showEditor && (
+          <BedEditModal
+            bed={bed}
+            cols={gridDims.cols}
+            rows={gridDims.rows}
+            otherBeds={otherBeds}
+            plants={bedPlants}
+            onClose={() => setShowEditor(false)}
+          />
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {checkPlant && (
