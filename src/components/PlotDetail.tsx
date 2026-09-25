@@ -228,6 +228,10 @@ export default function PlotDetail() {
   const cell = baseCell * zoom;
 
   const [showBedQuiz, setShowBedQuiz] = useState(false);
+  // Tap-to-place (mobile): pick a plant from the rail, then tap a bed cell.
+  const [placingPlant, setPlacingPlant] = useState<Inhabitant | null>(null);
+  // Tap-to-move (mobile): pick a bed, then tap the plot grid where it goes.
+  const [movingBed, setMovingBed] = useState<Planter | null>(null);
   const [isEditingPlot, setIsEditingPlot] = useState(false);
   const [isAddingLog, setIsAddingLog] = useState(false);
   const [isAddingTask, setIsAddingTask] = useState(false);
@@ -463,6 +467,95 @@ export default function PlotDetail() {
     }
   };
 
+  // Companion check: warn when a plant lands next to an antagonist
+  // or a same-family neighbor.
+  const warnForCompanionConflicts = (plant: Inhabitant, pos: { x: number; y: number }) => {
+    const conflicts = checkCompanionConflicts(
+      { name: plant.name, familyId: plant.familyId },
+      pos,
+      inhabitants
+        .filter((o) => o.id !== plant.id)
+        .map((o) => ({ id: o.id, name: o.name, familyId: o.familyId, gridPosition: o.gridPosition }))
+    );
+    if (conflicts.length > 0) {
+      toast.warning(
+        `${plant.name} landed next to ${conflicts.map((c) => c.neighborName).join(', ')} — ${conflicts[0].message}`,
+        { duration: 7000 }
+      );
+    }
+  };
+
+  /** Shared plant-placement write: used by drag-drop AND tap-to-place. */
+  const commitPlantPlacement = async (inhabitant: Inhabitant, targetPlanter: Planter, newPos: { x: number; y: number }) => {
+    try {
+      await updateDoc(doc(db, 'inhabitants', inhabitant.id), {
+        plotId: plotId,
+        gridPosition: newPos,
+        planterId: targetPlanter.id,
+        // First real placement: Pending -> Planted
+        ...(inhabitant.status === 'Pending' ? { status: 'Planted' as const } : {}),
+        updatedAt: serverTimestamp()
+      });
+
+      const currentLayout = plot?.mapLayout || [];
+      const updatedLayout = currentLayout.filter(item => item.id !== inhabitant.id);
+      updatedLayout.push({ id: inhabitant.id, x: newPos.x, y: newPos.y, type: 'plant' });
+      await updateDoc(doc(db, 'spatial_plots', plotId), { mapLayout: updatedLayout });
+
+      toast.success(`${inhabitant.name} planted in ${targetPlanter.name}`);
+      warnForCompanionConflicts(inhabitant, newPos);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `inhabitants/${inhabitant.id}`);
+    }
+  };
+
+  const bedsOverlap = (x: number, y: number, w: number, h: number, excludeId?: string) =>
+    planters.some(b =>
+      b.id !== excludeId &&
+      x < b.gridPosition.x + b.size.w && x + w > b.gridPosition.x &&
+      y < b.gridPosition.y + b.size.h && y + h > b.gridPosition.y
+    );
+
+  /** Shared bed-move write: used by drag-drop AND tap-to-move. Plants riding the bed move with it. */
+  const commitBedMove = async (planter: Planter, rawX: number, rawY: number) => {
+    // Beds stay inside the plot outline
+    const newX = Math.max(0, Math.min(COLS - planter.size.w, rawX));
+    const newY = Math.max(0, Math.min(ROWS - planter.size.h, rawY));
+    if (newX === planter.gridPosition.x && newY === planter.gridPosition.y) return;
+
+    try {
+      await updateDoc(doc(db, 'planters', planter.id), {
+        gridPosition: { x: newX, y: newY }
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `planters/${planter.id}`);
+      return;
+    }
+
+    const dx = newX - planter.gridPosition.x;
+    const dy = newY - planter.gridPosition.y;
+    if (dx !== 0 || dy !== 0) {
+      const riders = inhabitants.filter(p =>
+        p.planterId === planter.id ||
+        (!p.planterId && p.gridPosition &&
+          p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w &&
+          p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h)
+      );
+      for (const r of riders) {
+        const rx = Math.max(0, Math.min(COLS - 1, (r.gridPosition?.x || 0) + dx));
+        const ry = Math.max(0, Math.min(ROWS - 1, (r.gridPosition?.y || 0) + dy));
+        try {
+          await updateDoc(doc(db, 'inhabitants', r.id), {
+            gridPosition: { x: rx, y: ry },
+            planterId: planter.id,
+          });
+        } catch (error) {
+          handleFirestoreError(error, OperationType.UPDATE, `inhabitants/${r.id}`);
+        }
+      }
+    }
+  };
+
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over, delta } = event;
     setActiveId(null);
@@ -477,68 +570,13 @@ export default function PlotDetail() {
 
     if (!active || !user || !plotId) return;
 
-    // Companion check: warn when a plant lands next to an antagonist
-    // or a same-family neighbor. Runs against pre-drop neighbors (the
-    // dragged plant itself is excluded) at its new position.
-    const warnForCompanionConflicts = (plant: Inhabitant, pos: { x: number; y: number }) => {
-      const conflicts = checkCompanionConflicts(
-        { name: plant.name, familyId: plant.familyId },
-        pos,
-        inhabitants
-          .filter((o) => o.id !== plant.id)
-          .map((o) => ({ id: o.id, name: o.name, familyId: o.familyId, gridPosition: o.gridPosition }))
-      );
-      if (conflicts.length > 0) {
-        toast.warning(
-          `${plant.name} landed next to ${conflicts.map((c) => c.neighborName).join(', ')} — ${conflicts[0].message}`,
-          { duration: 7000 }
-        );
-      }
-    };
-
     const xDiff = Math.round(delta.x / cell);
     const yDiff = Math.round(delta.y / cell);
 
     if (active.data.current?.type === 'planter') {
       const planter = planters.find(p => p.id === active.id);
       if (planter) {
-        // Beds stay inside the plot outline
-        const newX = Math.max(0, Math.min(COLS - planter.size.w, planter.gridPosition.x + xDiff));
-        const newY = Math.max(0, Math.min(ROWS - planter.size.h, planter.gridPosition.y + yDiff));
-
-        try {
-          await updateDoc(doc(db, 'planters', planter.id), {
-            gridPosition: { x: newX, y: newY }
-          });
-        } catch (error) {
-          handleFirestoreError(error, OperationType.UPDATE, `planters/${planter.id}`);
-        }
-
-        // Plants riding the bed move with it: same shift, clamped to the plot.
-        // Plants with no planterId link yet but sitting inside the bed's old
-        // footprint get adopted so legacy placements heal themselves.
-        const dx = newX - planter.gridPosition.x;
-        const dy = newY - planter.gridPosition.y;
-        if (dx !== 0 || dy !== 0) {
-          const riders = inhabitants.filter(p =>
-            p.planterId === planter.id ||
-            (!p.planterId && p.gridPosition &&
-              p.gridPosition.x >= planter.gridPosition.x && p.gridPosition.x < planter.gridPosition.x + planter.size.w &&
-              p.gridPosition.y >= planter.gridPosition.y && p.gridPosition.y < planter.gridPosition.y + planter.size.h)
-          );
-          for (const r of riders) {
-            const rx = Math.max(0, Math.min(COLS - 1, (r.gridPosition?.x || 0) + dx));
-            const ry = Math.max(0, Math.min(ROWS - 1, (r.gridPosition?.y || 0) + dy));
-            try {
-              await updateDoc(doc(db, 'inhabitants', r.id), {
-                gridPosition: { x: rx, y: ry },
-                planterId: planter.id,
-              });
-            } catch (error) {
-              handleFirestoreError(error, OperationType.UPDATE, `inhabitants/${r.id}`);
-            }
-          }
-        }
+        await commitBedMove(planter, planter.gridPosition.x + xDiff, planter.gridPosition.y + yDiff);
       }
     } else if (active.data.current?.type === 'plant') {
       const inhabitant = [...inhabitants, ...availableInhabitants].find(p => p.id === active.id);
@@ -570,31 +608,8 @@ export default function PlotDetail() {
           toast.warning('Plants need a bed — drop it on a bed to plant it.', { duration: 4000 });
           return;
         }
-        {
-          const targetPlanter = target.bed;
-          // Land where the pointer actually is inside the bed, not the corner.
-          const newPos = target.pos;
-          try {
-            await updateDoc(doc(db, 'inhabitants', inhabitant.id), {
-              plotId: plotId,
-              gridPosition: newPos,
-              planterId: targetPlanter.id,
-              // First real placement: Pending -> Planted
-              ...(inhabitant.status === 'Pending' ? { status: 'Planted' as const } : {}),
-              updatedAt: serverTimestamp()
-            });
-
-            const currentLayout = plot.mapLayout || [];
-            const updatedLayout = currentLayout.filter(item => item.id !== inhabitant.id);
-            updatedLayout.push({ id: inhabitant.id, x: newPos.x, y: newPos.y, type: 'plant' });
-            await updateDoc(doc(db, 'spatial_plots', plotId), { mapLayout: updatedLayout });
-
-            toast.success(`${inhabitant.name} planted in ${targetPlanter.name}`);
-            warnForCompanionConflicts(inhabitant, newPos);
-          } catch (error) {
-            handleFirestoreError(error, OperationType.UPDATE, `inhabitants/${inhabitant.id}`);
-          }
-        }
+        // Land where the pointer actually is inside the bed, not the corner.
+        await commitPlantPlacement(inhabitant, target.bed, target.pos);
       }
     }
   };
@@ -1221,7 +1236,7 @@ export default function PlotDetail() {
             <div className="bg-white p-4 rounded-3xl border border-outline-variant/10 shadow-sm">
               <div className="flex items-center justify-between mb-3 px-2">
                 <h4 className="text-xs font-black uppercase tracking-[0.2em] text-on-surface-variant">
-                  Your plants <span className="text-primary">— drag onto the bed</span>
+                  Your plants <span className="text-primary">— tap one, then tap a bed cell</span>
                 </h4>
                 <span className="text-[10px] font-bold text-on-surface-variant">
                   {availableInhabitants.length} to place
@@ -1234,7 +1249,17 @@ export default function PlotDetail() {
               ) : (
                 <div className="flex gap-3 overflow-x-auto pb-2 pt-1 px-1 snap-x custom-scrollbar">
                   {availableInhabitants.map(inhabitant => (
-                    <DraggablePlantIcon key={inhabitant.id} inhabitant={inhabitant} compact />
+                    <DraggablePlantIcon
+                      key={inhabitant.id}
+                      inhabitant={inhabitant}
+                      compact
+                      selected={placingPlant?.id === inhabitant.id}
+                      onTapPlant={(p) => {
+                        if (suppressClickRef.current) return;
+                        setMovingBed(null);
+                        setPlacingPlant(prev => prev?.id === p.id ? null : p);
+                      }}
+                    />
                   ))}
                 </div>
               )}
@@ -1267,13 +1292,68 @@ export default function PlotDetail() {
             </div>
 
             <div
+              id="plot-grid"
               ref={gridWrapRef}
               onClick={() => setSelectedPlanterId(null)}
               className="relative overflow-auto bg-stone-100 rounded-[2.5rem] border-4 border-stone-200 shadow-inner min-h-[420px] p-6 custom-scrollbar"
             >
-              <div
-                ref={gridInnerRef}
-                className="relative bg-white shadow-2xl mx-auto rounded-lg border-4 border-primary/60"
+            {/* Tap-to-place / tap-to-move banners */}
+            <AnimatePresence>
+              {placingPlant && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+                  className="mb-3 flex items-center gap-3 bg-primary text-white rounded-2xl px-4 py-3 shadow-lg"
+                >
+                  <Target size={18} className="shrink-0" />
+                  <p className="text-sm font-bold flex-1">Tap a bed cell to plant <span className="font-black">{placingPlant.name}</span></p>
+                  <button
+                    onClick={() => setPlacingPlant(null)}
+                    className="p-2 rounded-xl bg-white/20 hover:bg-white/30 active:scale-90"
+                    aria-label="Cancel placing"
+                  >
+                    <X size={16} />
+                  </button>
+                </motion.div>
+              )}
+              {movingBed && !placingPlant && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+                  className="mb-3 flex items-center gap-3 bg-stone-800 text-white rounded-2xl px-4 py-3 shadow-lg"
+                >
+                  <Move size={18} className="shrink-0" />
+                  <p className="text-sm font-bold flex-1">Tap the plot where <span className="font-black">{movingBed.name}</span> should go</p>
+                  <button
+                    onClick={() => setMovingBed(null)}
+                    className="p-2 rounded-xl bg-white/20 hover:bg-white/30 active:scale-90"
+                    aria-label="Cancel moving"
+                  >
+                    <X size={16} />
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div
+              ref={gridInnerRef}
+              onClick={(e) => {
+                // Tap-to-move: tapping the plot grid relocates the selected bed.
+                if (!movingBed) return;
+                const box = gridInnerRef.current?.getBoundingClientRect();
+                if (!box) return;
+                const gx = Math.floor((e.clientX - box.left) / cell);
+                const gy = Math.floor((e.clientY - box.top) / cell);
+                const nx = Math.max(0, Math.min(COLS - movingBed.size.w, gx));
+                const ny = Math.max(0, Math.min(ROWS - movingBed.size.h, gy));
+                if (bedsOverlap(nx, ny, movingBed.size.w, movingBed.size.h, movingBed.id)) {
+                  toast.warning('That spot overlaps another bed — pick a clear area.');
+                  return;
+                }
+                commitBedMove(movingBed, nx, ny).then(() => {
+                  toast.success(`${movingBed.name} moved`);
+                  setMovingBed(null);
+                });
+              }}
+              className="relative bg-white shadow-2xl mx-auto rounded-lg border-4 border-primary/60"
                 style={{
                   width: COLS * cell,
                   height: ROWS * cell,
@@ -1296,6 +1376,13 @@ export default function PlotDetail() {
                     inhabitants={inhabitants.filter(p => (p.gridPosition?.x ?? -1) >= planter.gridPosition.x && (p.gridPosition?.x ?? -1) < planter.gridPosition.x + planter.size.w && (p.gridPosition?.y ?? -1) >= planter.gridPosition.y && (p.gridPosition?.y ?? -1) < planter.gridPosition.y + planter.size.h)}
                     activeLayer={activeLayer}
                     onSelectPlant={handleSelectPlant}
+                    placing={!!placingPlant}
+                    onPlaceCell={(bed, pos) => {
+                      if (!placingPlant) return;
+                      const plant = placingPlant;
+                      setPlacingPlant(null);
+                      commitPlantPlacement(plant, bed, pos);
+                    }}
                   />
                 ))}
 
@@ -1347,7 +1434,7 @@ export default function PlotDetail() {
               </DragOverlay>
             </div>
             <p className="text-[11px] font-bold text-on-surface-variant text-center">
-              Drag beds to move them around the plot. Plants only grow in beds — drag a plant onto a bed to plant it, or between beds to move it.
+              Tap a plant in the rail, then tap a bed cell to plant it — or drag if you prefer. Move beds with the Move button on their card, then tap the plot where the bed should go.
             </p>
 
             {/* Bed cards — one per bed, tap for the focused single-bed view */}
@@ -1374,7 +1461,22 @@ export default function PlotDetail() {
                       >
                         <div className="flex items-center justify-between mb-2">
                           <span className="font-black text-sm text-on-surface truncate">{bed.name || 'Bed'}</span>
-                          <ChevronRight size={16} className="text-on-surface-variant shrink-0" />
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPlacingPlant(null);
+                                setSelectedPlanterId(bed.id);
+                                setMovingBed(bed);
+                                document.getElementById('plot-grid')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                              }}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-stone-800 text-white text-[11px] font-black active:scale-95 transition-transform"
+                              aria-label={`Move ${bed.name || 'bed'}`}
+                            >
+                              <Move size={12} /> Move
+                            </button>
+                            <ChevronRight size={16} className="text-on-surface-variant" />
+                          </div>
                         </div>
                         <div className="flex items-center gap-4 text-[11px] font-bold text-on-surface-variant">
                           <span className="flex items-center gap-1"><Leaf size={12} /> {bedPlants.length} plant{bedPlants.length === 1 ? '' : 's'}</span>
@@ -2182,7 +2284,7 @@ export default function PlotDetail() {
   );
 }
 
-function DraggablePlantIcon({ inhabitant, compact = false }: { inhabitant: Inhabitant; compact?: boolean }) {
+function DraggablePlantIcon({ inhabitant, compact = false, onTapPlant, selected }: { inhabitant: Inhabitant; compact?: boolean; onTapPlant?: (p: Inhabitant) => void; selected?: boolean }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: inhabitant.id,
     data: { type: 'plant' }
@@ -2208,9 +2310,11 @@ function DraggablePlantIcon({ inhabitant, compact = false }: { inhabitant: Inhab
         {...listeners}
         {...attributes}
         onPointerDown={stopProp}
+        onClick={() => { if (onTapPlant) onTapPlant(inhabitant); }}
         className={cn(
           "shrink-0 snap-start w-20 flex flex-col items-center gap-1.5 cursor-grab active:cursor-grabbing botanical-tooltip",
-          isDragging && "opacity-50"
+          isDragging && "opacity-50",
+          selected && "ring-4 ring-primary rounded-2xl"
         )}
         data-tooltip={`${inhabitant.name} (${cohort})`}
       >
@@ -2336,7 +2440,7 @@ function BedPlantDot({ inhabitant, cell, onSelect }: { inhabitant: Inhabitant; c
   );
 }
 
-function PlanterItem({ planter, cell, onEdit, onTap, selected, inhabitants, activeLayer, onSelectPlant }: { planter: Planter, cell: number, onEdit: () => void, onTap: () => void, selected: boolean, inhabitants: Inhabitant[], activeLayer: string, onSelectPlant?: (inhabitant: Inhabitant) => void }) {
+function PlanterItem({ planter, cell, onEdit, onTap, selected, inhabitants, activeLayer, onSelectPlant, placing, onPlaceCell }: { planter: Planter, cell: number, onEdit: () => void, onTap: () => void, selected: boolean, inhabitants: Inhabitant[], activeLayer: string, onSelectPlant?: (inhabitant: Inhabitant) => void, placing?: boolean, onPlaceCell?: (planter: Planter, pos: { x: number; y: number }) => void }) {
   const { setNodeRef, isOver } = useDroppable({
     id: planter.id,
     data: { type: 'planter' }
@@ -2403,6 +2507,28 @@ function PlanterItem({ planter, cell, onEdit, onTap, selected, inhabitants, acti
         >
           <Settings2 size={10} />
         </button>
+
+        {/* Tap-to-place overlay: every cell becomes a big tappable target */}
+        {placing && onPlaceCell && (
+          <div className="absolute inset-0 z-30 grid" style={{ gridTemplateColumns: `repeat(${planter.size.w}, 1fr)`, gridTemplateRows: `repeat(${planter.size.h}, 1fr)` }}>
+            {Array.from({ length: planter.size.w * planter.size.h }).map((_, i) => {
+              const cx = i % planter.size.w;
+              const cy = Math.floor(i / planter.size.w);
+              return (
+                <button
+                  key={i}
+                  aria-label={`Plant here (cell ${cx + 1}, ${cy + 1})`}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onPlaceCell(planter, { x: planter.gridPosition.x + cx, y: planter.gridPosition.y + cy });
+                  }}
+                  className="border border-primary/30 bg-primary/10 hover:bg-primary/30 active:bg-primary/50 transition-colors touch-target"
+                />
+              );
+            })}
+          </div>
+        )}
 
         {/* Inhabitants inside planter — positioned by their grid cell relative
             to the bed, so a drop lands exactly where the pointer was. */}
