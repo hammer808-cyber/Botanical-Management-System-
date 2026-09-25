@@ -47,7 +47,8 @@ export default function BedBuildQuiz({ plotId, plotName, plotCols, plotRows, exi
   // Step 2 — plant picks (indices into PLANT_DATABASE)
   const [tab, setTab] = useState<(typeof TABS)[number]>('Vegetable');
   const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  // index -> quantity: pick a plant once, then set how many to place.
+  const [selected, setSelected] = useState<Map<number, number>>(new Map());
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -60,12 +61,23 @@ export default function BedBuildQuiz({ plotId, plotName, plotCols, plotRows, exi
 
   const togglePlant = (i: number) => {
     setSelected(prev => {
-      const next = new Set(prev);
+      const next = new Map(prev);
       if (next.has(i)) next.delete(i);
-      else next.add(i);
+      else next.set(i, 1);
       return next;
     });
   };
+
+  const setQty = (i: number, qty: number) => {
+    setSelected(prev => {
+      const next = new Map(prev);
+      if (qty <= 0) next.delete(i);
+      else next.set(i, Math.min(99, qty));
+      return next;
+    });
+  };
+
+  const totalPicked = [...selected.values()].reduce((a, b) => a + b, 0);
 
   const canNextStep1 = bedName.trim().length > 0 && Number(widthFt) > 0 && Number(depthFt) > 0;
   // Plants are optional — a bed can be built empty and planted later.
@@ -105,27 +117,30 @@ export default function BedBuildQuiz({ plotId, plotName, plotCols, plotRows, exi
         createdAt: serverTimestamp()
       });
 
-      // 2. Create one inhabitant per chosen plant — unmapped so they land in the rail
-      const picks: PlantInfo[] = [...selected].map(i => PLANT_DATABASE[i]);
-      for (const plant of picks) {
-        await addDoc(collection(db, 'inhabitants'), {
-          ownerUid: user.uid,
-          name: plant.name,
-          latinName: plant.scientific,
-          type: mapInhabitantType(plant.type),
-          image: plant.image,
-          waterFreq: plant.water,
-          sunExposure: plant.sun,
-          status: 'Pending',
-          plotId,
-          gridPosition: { x: 0, y: 0 },
-          createdAt: serverTimestamp()
-        });
+      // 2. Create inhabitants per chosen plant × quantity — unmapped so they land in the rail
+      const picks: { plant: PlantInfo; qty: number }[] = [...selected.entries()].map(([i, qty]) => ({ plant: PLANT_DATABASE[i], qty }));
+      const totalPlants = picks.reduce((a, x) => a + x.qty, 0);
+      for (const { plant, qty } of picks) {
+        for (let n = 0; n < qty; n++) {
+          await addDoc(collection(db, 'inhabitants'), {
+            ownerUid: user.uid,
+            name: plant.name,
+            latinName: plant.scientific,
+            type: mapInhabitantType(plant.type),
+            image: plant.image,
+            waterFreq: plant.water,
+            sunExposure: plant.sun,
+            status: 'Pending',
+            plotId,
+            gridPosition: { x: 0, y: 0 },
+            createdAt: serverTimestamp()
+          });
+        }
       }
 
       toast.success(
-        picks.length > 0
-          ? `${bedName.trim() || 'Bed'} built with ${picks.length} plant${picks.length === 1 ? '' : 's'} — drag them onto the bed!`
+        totalPlants > 0
+          ? `${bedName.trim() || 'Bed'} built with ${totalPlants} plant${totalPlants === 1 ? '' : 's'} — tap one, then tap the bed!`
           : `${bedName.trim() || 'Bed'} added to ${plotName}.`
       );
       onComplete(bedRef.id);
@@ -258,11 +273,12 @@ export default function BedBuildQuiz({ plotId, plotName, plotCols, plotRows, exi
                       {t === 'All' ? 'All' : `${t}s`}
                     </button>
                   ))}
-                  <span className="ml-auto text-xs font-bold text-primary self-center">{selected.size} picked</span>
+                  <span className="ml-auto text-xs font-bold text-primary self-center">{totalPicked} picked</span>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[38vh] overflow-y-auto pr-1 custom-scrollbar">
                   {filtered.map(({ p, i }) => {
-                    const isSel = selected.has(i);
+                    const qty = selected.get(i) ?? 0;
+                    const isSel = qty > 0;
                     return (
                       <button key={i} onClick={() => togglePlant(i)}
                         className={cn('relative rounded-2xl overflow-hidden border-2 text-left transition-all group',
@@ -278,6 +294,24 @@ export default function BedBuildQuiz({ plotId, plotName, plotCols, plotRows, exi
                           isSel ? 'bg-primary text-white' : 'bg-white/80 text-transparent border border-stone-200')}>
                           <Check size={14} strokeWidth={3} />
                         </div>
+                        {isSel && (
+                          <div
+                            className="absolute bottom-2 left-2 right-2 flex items-center justify-between bg-stone-900/85 text-white rounded-xl px-1 py-1"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <span
+                              role="button" aria-label={`Fewer ${p.name}`}
+                              onClick={(e) => { e.stopPropagation(); setQty(i, qty - 1); }}
+                              className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/20 active:bg-white/40 font-black text-lg touch-target"
+                            >−</span>
+                            <span className="font-black text-sm">{qty}</span>
+                            <span
+                              role="button" aria-label={`More ${p.name}`}
+                              onClick={(e) => { e.stopPropagation(); setQty(i, qty + 1); }}
+                              className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/20 active:bg-white/40 font-black text-lg touch-target"
+                            >+</span>
+                          </div>
+                        )}
                       </button>
                     );
                   })}
@@ -298,16 +332,19 @@ export default function BedBuildQuiz({ plotId, plotName, plotCols, plotRows, exi
                   </p>
                 </div>
                 <div>
-                  <div className="flex items-center gap-2 text-primary mb-3"><Leaf size={16} /><span className="text-xs font-black uppercase tracking-widest">Plants to place ({selected.size})</span></div>
+                  <div className="flex items-center gap-2 text-primary mb-3"><Leaf size={16} /><span className="text-xs font-black uppercase tracking-widest">Plants to place ({totalPicked})</span></div>
                   <div className="flex gap-3 overflow-x-auto pb-2 snap-x custom-scrollbar">
-                    {[...selected].map(i => {
+                    {[...selected.entries()].map(([i, qty]) => {
                       const p = PLANT_DATABASE[i];
                       return (
                         <div key={i} className="shrink-0 snap-start w-20 flex flex-col items-center gap-1.5">
-                          <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-primary/30 shadow-sm">
+                          <div className="relative w-16 h-16 rounded-2xl overflow-hidden border-2 border-primary/30 shadow-sm">
                             <PlantImage src={p.image} alt={p.name} className="w-full h-full object-cover" />
+                            {qty > 1 && (
+                              <span className="absolute bottom-0 right-0 bg-primary text-white text-[10px] font-black px-1.5 py-0.5 rounded-tl-lg">×{qty}</span>
+                            )}
                           </div>
-                          <span className="text-[10px] font-bold text-center leading-tight line-clamp-2">{p.name}</span>
+                          <span className="text-[10px] font-bold text-center leading-tight line-clamp-2">{p.name}{qty > 1 ? ` ×${qty}` : ''}</span>
                         </div>
                       );
                     })}

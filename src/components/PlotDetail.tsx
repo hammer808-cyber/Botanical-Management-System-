@@ -521,7 +521,7 @@ export default function PlotDetail() {
     // Beds stay inside the plot outline
     const newX = Math.max(0, Math.min(COLS - planter.size.w, rawX));
     const newY = Math.max(0, Math.min(ROWS - planter.size.h, rawY));
-    if (newX === planter.gridPosition.x && newY === planter.gridPosition.y) return;
+    if (newX === planter.gridPosition.x && newY === planter.gridPosition.y) return false;
 
     try {
       await updateDoc(doc(db, 'planters', planter.id), {
@@ -529,7 +529,7 @@ export default function PlotDetail() {
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `planters/${planter.id}`);
-      return;
+      return false;
     }
 
     const dx = newX - planter.gridPosition.x;
@@ -553,6 +553,45 @@ export default function PlotDetail() {
           handleFirestoreError(error, OperationType.UPDATE, `inhabitants/${r.id}`);
         }
       }
+    }
+    return true;
+  };
+
+  /** Nudge the moving bed one cell; used by the banner arrow pad. */
+  /** Tap-to-move: tap anywhere on the plot (bed or bare grid) to drop the bed there. */
+  const handleMoveTap = (e: React.MouseEvent) => {
+    if (!movingBed || placingPlant) return;
+    const el = gridInnerRef.current;
+    if (!el) return;
+    const box = el.getBoundingClientRect();
+    const gx = Math.floor((e.clientX - box.left) / cell);
+    const gy = Math.floor((e.clientY - box.top) / cell);
+    if (gx < 0 || gy < 0 || gx >= COLS || gy >= ROWS) return;
+    if (bedsOverlap(gx, gy, movingBed.size.w, movingBed.size.h, movingBed.id)) {
+      toast.warning("Can't move there — another bed is in the way.");
+      return;
+    }
+    const mb = movingBed;
+    commitBedMove(mb, gx, gy).then((moved) => {
+      if (moved) {
+        setMovingBed(null);
+        toast.success(`Moved ${mb.name}`);
+      }
+    });
+  };
+
+  const nudgeMovingBed = async (dx: number, dy: number) => {
+    if (!movingBed) return;
+    const nx = Math.max(0, Math.min(COLS - movingBed.size.w, movingBed.gridPosition.x + dx));
+    const ny = Math.max(0, Math.min(ROWS - movingBed.size.h, movingBed.gridPosition.y + dy));
+    if (bedsOverlap(nx, ny, movingBed.size.w, movingBed.size.h, movingBed.id)) {
+      toast.warning("Can't move there — another bed is in the way.");
+      return;
+    }
+    const moved = await commitBedMove(movingBed, nx, ny);
+    if (moved) {
+      // refresh the moving snapshot so repeated nudges keep working
+      setMovingBed({ ...movingBed, gridPosition: { x: nx, y: ny } });
     }
   };
 
@@ -1318,17 +1357,36 @@ export default function PlotDetail() {
               {movingBed && !placingPlant && (
                 <motion.div
                   initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-                  className="mb-3 flex items-center gap-3 bg-stone-800 text-white rounded-2xl px-4 py-3 shadow-lg"
+                  className="mb-3 bg-stone-800 text-white rounded-2xl px-4 py-3 shadow-lg space-y-2"
                 >
-                  <Move size={18} className="shrink-0" />
-                  <p className="text-sm font-bold flex-1">Tap the plot where <span className="font-black">{movingBed.name}</span> should go</p>
-                  <button
-                    onClick={() => setMovingBed(null)}
-                    className="p-2 rounded-xl bg-white/20 hover:bg-white/30 active:scale-90"
-                    aria-label="Cancel moving"
-                  >
-                    <X size={16} />
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <Move size={18} className="shrink-0" />
+                    <p className="text-sm font-bold flex-1">Move <span className="font-black">{movingBed.name}</span> — tap the plot, or nudge it:</p>
+                    <button
+                      onClick={() => { setMovingBed(null); toast.info('Move cancelled'); }}
+                      className="p-2 rounded-xl bg-white/20 hover:bg-white/30 active:scale-90"
+                      aria-label="Done moving"
+                    >
+                      <Check size={16} />
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-center gap-2">
+                    {[
+                      { dx: 0, dy: -1, label: 'Up', arrow: '▲' },
+                      { dx: -1, dy: 0, label: 'Left', arrow: '◀' },
+                      { dx: 1, dy: 0, label: 'Right', arrow: '▶' },
+                      { dx: 0, dy: 1, label: 'Down', arrow: '▼' },
+                    ].map(a => (
+                      <button
+                        key={a.label}
+                        onClick={() => nudgeMovingBed(a.dx, a.dy)}
+                        aria-label={`Nudge ${a.label}`}
+                        className="w-12 h-12 rounded-2xl bg-white/15 hover:bg-white/25 active:scale-90 text-lg font-black touch-target flex items-center justify-center"
+                      >
+                        {a.arrow}
+                      </button>
+                    ))}
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
