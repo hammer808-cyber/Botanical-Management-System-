@@ -36,9 +36,9 @@ function AppContent() {
     return <Login />;
   }
 
-  // Served from the /Botanical-Management-System-/ subpath on GitHub Pages;
+  // Served from the /Plotwise/ subpath on GitHub Pages;
   // basename keeps client-side routes under it. import.meta.env.BASE_URL is
-  // '/Botanical-Management-System-/' in the Pages build ('/' in dev).
+  // '/Plotwise/' in the Pages build ('/' in dev).
   const basename = import.meta.env.BASE_URL.replace(/\/+$/, '') || '/';
 
   return (

@@ -10,7 +10,7 @@ export default defineConfig(({mode}) => {
     // Absolute base so the production build works from the GitHub Pages
     // project subpath. Pair with the Router basename in App.tsx and the
     // public/404.html SPA fallback so deep links survive refreshes.
-    base: '/Botanical-Management-System-/',
+    base: '/Plotwise/',
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
     },
