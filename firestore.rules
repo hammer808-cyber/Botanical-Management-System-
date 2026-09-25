@@ -507,6 +507,14 @@ service cloud.firestore {
       allow create: if isAuthenticated() && isValidInhabitant(request.resource.data);
       allow update: if (isDocOwner() && isValidInhabitant(request.resource.data) && uidNotModified()) || isAdmin();
       allow delete: if isDocOwner() || isAdmin();
+
+      // Per-plant photo timeline (visual growth log)
+      match /photos/{photoId} {
+        allow read: if isDocOwner() || isAdmin();
+        allow create: if isAuthenticated() && request.resource.data.ownerUid == request.auth.uid;
+        allow update: if isDocOwner() || isAdmin();
+        allow delete: if isDocOwner() || isAdmin();
+      }
     }
 
     match /spatial_plots/{id} {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Heart, Share2, Droplets, Sun, Thermometer, Info, Calendar, Scissors, AlertCircle, ChevronRight, Check, Activity, X, BookOpen, Trash2, Settings2, ClipboardList, Plus, Loader2, CheckCircle2, Clock, Stethoscope, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Heart, Share2, Droplets, Sun, Thermometer, Info, Calendar, Scissors, AlertCircle, ChevronRight, Check, Activity, X, BookOpen, Trash2, Settings2, ClipboardList, Plus, Loader2, CheckCircle2, Clock, Stethoscope, RefreshCw, Camera } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import DatePicker from 'react-datepicker';
 import "react-datepicker/dist/react-datepicker.css";
@@ -16,6 +16,7 @@ import { format } from 'date-fns';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import HealthCheckWizard from './HealthCheckWizard';
 import { getPlantInfo } from '../constants/plants';
+import PlantPhotoLog from './PlantPhotoLog';
 import { PLANT_PLACEHOLDER } from '../lib/plantImage';
 
 export default function PlantDetail() {
@@ -241,6 +242,17 @@ export default function PlantDetail() {
         updatedAt: serverTimestamp()
       });
 
+      // Keep the visual timeline complete: profile changes are logged too
+      try {
+        await addDoc(collection(db, 'inhabitants', id, 'photos'), {
+          url: downloadURL,
+          storagePath: `inhabitants/${user.uid}/${id}/${Date.now()}_${file.name}`,
+          caption: 'Profile photo',
+          ownerUid: user.uid,
+          createdAt: serverTimestamp(),
+        });
+      } catch { /* log write is best-effort */ }
+
       toast.success('Botanical photo updated!', { id: toastId });
     } catch (error) {
       console.error('Upload error:', error);
@@ -438,7 +450,7 @@ export default function PlantDetail() {
               {isUploading ? (
                 <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
               ) : (
-                <Scissors size={20} className="rotate-90" /> // Using Scissors as a placeholder for "Add Photo" if no better icon, but wait, I have Upload or Camera?
+                <Camera size={20} />
               )}
             </button>
             <button
@@ -835,6 +847,16 @@ export default function PlantDetail() {
             {plant.description || "No botanical profile available for this entry."}
           </p>
         </section>
+
+        {/* Photo Log — visual growth timeline */}
+        <PlantPhotoLog
+          plantId={id!}
+          plantName={plant.name}
+          currentImage={plant.image}
+          onSetProfilePhoto={async (url) => {
+            await updateDoc(doc(db, 'inhabitants', id), { image: url, updatedAt: serverTimestamp() });
+          }}
+        />
 
         {/* Active Tasks Section */}
         <section className="space-y-6">
