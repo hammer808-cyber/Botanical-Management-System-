@@ -300,11 +300,14 @@ export default function PlantDetail() {
         transaction.set(calendarRef, {
           ownerUid: user.uid,
           title: `Completed: ${task.task}`,
+          description: `Task completed for plant: ${plant.name}`,
+          date: format(new Date(), 'yyyy-MM-dd'),
+          type: 'Task',
+          priority: 'Medium',
           start: new Date().toISOString(),
           end: new Date().toISOString(),
           allDay: true,
           category: task.category || 'Maintenance',
-          description: `Task completed for plant: ${plant.name}`,
           plotId: plant.plotId || null,
           plantId: id,
           createdAt: serverTimestamp()

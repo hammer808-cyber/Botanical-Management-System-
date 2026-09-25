@@ -217,8 +217,9 @@ export default function Financials() {
           plotId: task.plotId || null,
           plantId: task.plantId || null,
           plantName: task.plantName || null,
-          category: task.frequency,
+          category: task.frequency || 'Maintenance',
           status: 'Archive',
+          completionDate: serverTimestamp(),
           timestamp: new Date().toISOString()
         },
         calendarTitle: `COMPLETED: ${task.task}`,

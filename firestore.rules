@@ -485,6 +485,18 @@ service cloud.firestore {
         (!('isCustom' in data) || data.isCustom is bool);
     }
 
+    function isValidEquipment(data) {
+      return hasRequiredFields(['ownerUid', 'name', 'createdAt']) &&
+        data.ownerUid == request.auth.uid &&
+        data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+        data.createdAt is timestamp &&
+        (!('category' in data) || (data.category is string && data.category.size() < 100)) &&
+        (!('condition' in data) || (data.condition is string && data.condition.size() < 100)) &&
+        (!('quantity' in data) || (data.quantity is number && data.quantity >= 0)) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() < 5000)) &&
+        (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
     function isValidTreatmentEvent(data) {
       return hasRequiredFields(['ownerUid', 'diagnosis', 'treatment', 'createdAt']) &&
         data.ownerUid == request.auth.uid &&
@@ -639,6 +651,13 @@ service cloud.firestore {
       allow create: if isAuthenticated() && isValidCustomTaxonomy(request.resource.data);
       allow update: if (isAuthenticated() && resource.data.discoveredBy == request.auth.uid && isValidCustomTaxonomy(request.resource.data)) || isAdmin();
       allow delete: if (isAuthenticated() && resource.data.discoveredBy == request.auth.uid) || isAdmin();
+    }
+
+    match /equipment/{id} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidEquipment(request.resource.data);
+      allow update: if (isDocOwner() && isValidEquipment(request.resource.data) && uidNotModified()) || isAdmin();
+      allow delete: if isDocOwner() || isAdmin();
     }
 
     match /treatment_events/{id} {

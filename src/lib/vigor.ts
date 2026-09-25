@@ -142,7 +142,10 @@ function scorePests(plant: Inhabitant, treatments: VigorTreatment[]): number {
   const active = mine.filter((t) => String(t.status || '').toLowerCase() === 'active');
   if (active.length > 0) return Math.max(0, 70 - active.length * 30);
   const resolved = mine
-    .filter((t) => String(t.status || '').toLowerCase() === 'resolved')
+    .filter((t) => {
+      const s = String(t.status || '').toLowerCase();
+      return s === 'resolved' || s === 'completed';
+    })
     .map((t) => ({ t, days: daysSince(toDate(t.resolvedAt) || toDate(t.createdAt)) }))
     .filter((x) => x.days !== null) as { t: VigorTreatment; days: number }[];
   if (resolved.length === 0) return 100;

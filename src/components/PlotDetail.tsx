@@ -977,6 +977,7 @@ export default function PlotDetail() {
           plantName: task.plantName || null,
           category: task.category || 'Maintenance',
           status: 'Completed',
+          completionDate: serverTimestamp(),
           timestamp: new Date().toISOString()
         },
         calendarTitle: `Completed: ${task.task} (${plot?.name || 'Plot'})`,

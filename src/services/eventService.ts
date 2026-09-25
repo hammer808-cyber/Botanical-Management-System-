@@ -1,7 +1,8 @@
 import { db, collection, addDoc, serverTimestamp, handleFirestoreError, OperationType } from '../firebase';
 import { format } from 'date-fns';
+import { globalEventTimestamp, resolveEventTarget } from '../lib/writeGuards';
 
-export type EventType = 'Watering' | 'Fertilizing' | 'Pruning' | 'Harvesting' | 'Pest Control' | 'Soil Amendment' | 'Propagation' | 'Task' | 'Treatment' | 'Weeding' | 'Health Check';
+export type EventType = 'Watering' | 'Fertilizing' | 'Pruning' | 'Harvesting' | 'Pest Control' | 'Soil Amendment' | 'Propagation' | 'Task' | 'Treatment' | 'Weeding' | 'Health Check' | 'Manual';
 
 interface LogEventParams {
   ownerUid: string;
@@ -34,14 +35,24 @@ export async function logEvent({
   try {
     // 1. Save full technical record to the specific Category Source
     const categoryRef = collection(db, category);
-    const technicalRecord = {
+    const target = resolveEventTarget({
+      targetId,
+      targetType,
+      dataTargetId: data.targetId,
+      dataTargetType: data.targetType,
+      plantId: data.plantId,
+      plotId: data.plotId,
+    });
+    const technicalRecord: Record<string, any> = {
       ...data,
       ownerUid,
-      targetId: targetId || data.plantId || data.plotId || null,
-      targetType: targetType || (data.plantId ? 'Inhabitant' : data.plotId ? 'SpatialPlot' : null),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
+    if (target.targetId) technicalRecord.targetId = target.targetId;
+    else delete technicalRecord.targetId;
+    if (target.targetType) technicalRecord.targetType = target.targetType;
+    else delete technicalRecord.targetType;
     const docRef = await addDoc(categoryRef, technicalRecord);
 
     // 2. Emit a simplified 'When/Where' entry to the Calendar Tab
@@ -67,6 +78,7 @@ export async function logEvent({
       sourceId: docRef.id,
       sourceCategory: category,
       xpEarned: data.xpEarned || 0,
+      timestamp: globalEventTimestamp(data),
     });
 
     return docRef;
