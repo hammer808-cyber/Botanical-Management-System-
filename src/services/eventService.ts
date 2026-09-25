@@ -1,7 +1,7 @@
 import { db, collection, addDoc, serverTimestamp, handleFirestoreError, OperationType } from '../firebase';
 import { format } from 'date-fns';
 
-export type EventType = 'Watering' | 'Fertilizing' | 'Pruning' | 'Harvesting' | 'Pest Control' | 'Soil Amendment' | 'Propagation' | 'Task' | 'Treatment' | 'Weeding';
+export type EventType = 'Watering' | 'Fertilizing' | 'Pruning' | 'Harvesting' | 'Pest Control' | 'Soil Amendment' | 'Propagation' | 'Task' | 'Treatment' | 'Weeding' | 'Health Check';
 
 interface LogEventParams {
   ownerUid: string;

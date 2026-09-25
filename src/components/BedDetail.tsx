@@ -5,8 +5,11 @@ import { db } from '../firebase';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { averageVigor } from '../lib/vigor';
 import { useActivePlot } from '../contexts/ActivePlotContext';
-import { ArrowLeft, Leaf, Ruler, Activity, Plus } from 'lucide-react';
+import { ArrowLeft, Leaf, Ruler, Activity, Plus, Stethoscope } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
+import { AnimatePresence } from 'motion/react';
+import HealthCheckWizard from './HealthCheckWizard';
+import PlantImage from './PlantImage';
 import type { Inhabitant } from '../types';
 
 interface Bed {
@@ -35,6 +38,7 @@ export default function BedDetail() {
   const [bed, setBed] = useState<Bed | null>(null);
   const [plants, setPlants] = useState<Inhabitant[]>([]);
   const [loading, setLoading] = useState(true);
+  const [checkPlant, setCheckPlant] = useState<Inhabitant | null>(null);
 
   useEffect(() => {
     if (plotId) setActivePlotId(plotId);
@@ -161,7 +165,7 @@ export default function BedDetail() {
                 >
                   {plant ? (
                     plant.image ? (
-                      <img src={plant.image} alt={plant.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      <PlantImage src={plant.image} alt={plant.name} className="w-full h-full object-cover" />
                     ) : (
                       <Leaf size={26} className="text-primary" />
                     )
@@ -203,7 +207,7 @@ export default function BedDetail() {
               >
                 <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center overflow-hidden shrink-0">
                   {plant.image ? (
-                    <img src={plant.image} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    <PlantImage src={plant.image} alt="" className="w-full h-full object-cover" />
                   ) : (
                     <Leaf size={18} className="text-primary" />
                   )}
@@ -213,6 +217,13 @@ export default function BedDetail() {
                   <p className="text-[11px] text-on-surface-variant">{plant.status || 'Planted'}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setCheckPlant(plant); }}
+                    className="p-2 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-colors touch-target"
+                    aria-label={`Quick health check for ${plant.name}`}
+                  >
+                    <Stethoscope size={16} />
+                  </button>
                   <Activity size={14} className={vigorColor(plant.vigorIndex ?? null)} />
                   <span className={cn('text-sm font-black', vigorColor(plant.vigorIndex ?? null))}>
                     {typeof plant.vigorIndex === 'number' ? `${plant.vigorIndex}%` : '—'}
@@ -223,6 +234,19 @@ export default function BedDetail() {
           </div>
         )}
       </div>
+
+      <AnimatePresence>
+        {checkPlant && (
+          <HealthCheckWizard
+            plant={checkPlant}
+            onClose={() => setCheckPlant(null)}
+            onDone={(v) => {
+              setPlants((prev) => prev.map((x) => (x.id === checkPlant.id ? { ...x, vigorIndex: v } : x)));
+              setCheckPlant(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

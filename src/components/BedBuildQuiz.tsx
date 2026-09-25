@@ -6,10 +6,17 @@ import { useFirebase } from '../contexts/FirebaseContext';
 import { db, collection, addDoc, serverTimestamp, handleFirestoreError, OperationType } from '../firebase';
 import { toast } from 'sonner';
 import { cn } from '@/src/lib/utils';
+import PlantImage from './PlantImage';
 
 interface BedBuildQuizProps {
+  /** The plot this bed is being added to — beds always live inside a plot. */
+  plotId: string;
+  plotName: string;
+  plotCols: number;
+  plotRows: number;
+  existingBeds: { gridPosition: { x: number; y: number }; size: { w: number; h: number } }[];
   onClose: () => void;
-  onComplete: (plotId: string) => void;
+  onComplete: (bedId: string) => void;
 }
 
 const SUN_OPTIONS = ['Full Sun', 'Partial Shade', 'Full Shade'];
@@ -23,15 +30,17 @@ function mapInhabitantType(t: string): string {
   return 'Annual';
 }
 
-export default function BedBuildQuiz({ onClose, onComplete }: BedBuildQuizProps) {
+export default function BedBuildQuiz({ plotId, plotName, plotCols, plotRows, existingBeds, onClose, onComplete }: BedBuildQuizProps) {
   const { user } = useFirebase();
   const [step, setStep] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Step 1 — bed basics
+  // Step 1 — bed basics (capped to the plot's footprint)
+  const maxW = Math.max(1, plotCols);
+  const maxH = Math.max(1, plotRows);
   const [bedName, setBedName] = useState('');
-  const [widthFt, setWidthFt] = useState('4');
-  const [depthFt, setDepthFt] = useState('8');
+  const [widthFt, setWidthFt] = useState(String(Math.min(4, maxW)));
+  const [depthFt, setDepthFt] = useState(String(Math.min(8, maxH)));
   const [sun, setSun] = useState('Full Sun');
   const [soil, setSoil] = useState('Loam');
 
@@ -59,41 +68,44 @@ export default function BedBuildQuiz({ onClose, onComplete }: BedBuildQuizProps)
   };
 
   const canNextStep1 = bedName.trim().length > 0 && Number(widthFt) > 0 && Number(depthFt) > 0;
-  const canFinish = selected.size > 0;
+  // Plants are optional — a bed can be built empty and planted later.
 
   const handleBuild = async () => {
-    if (!user || isSaving || !canFinish) return;
+    if (!user || isSaving) return;
     setIsSaving(true);
     try {
-      const w = Math.max(1, Math.min(30, Math.round(Number(widthFt) || 4)));
-      const h = Math.max(1, Math.min(20, Math.round(Number(depthFt) || 8)));
+      // The bed must fit inside the plot — clamp to the plot footprint.
+      const w = Math.max(1, Math.min(maxW, Math.round(Number(widthFt) || 4)));
+      const h = Math.max(1, Math.min(maxH, Math.round(Number(depthFt) || 8)));
 
-      // 1. Create the plot
-      const plotRef = await addDoc(collection(db, 'spatial_plots'), {
-        ownerUid: user.uid,
-        name: bedName.trim(),
-        status: 'Active',
-        soilType: soil,
-        sunExposure: sun,
-        gridConfig: { cols: w, rows: h },
-        healthStatus: 'Stable',
-        createdAt: serverTimestamp(),
-        mapLayout: []
-      });
+      // Find the first free spot scanning top-left to bottom-right so new
+      // beds don't stack on top of existing ones.
+      const overlaps = (x: number, y: number) =>
+        existingBeds.some(b =>
+          x < b.gridPosition.x + b.size.w && x + w > b.gridPosition.x &&
+          y < b.gridPosition.y + b.size.h && y + h > b.gridPosition.y
+        );
+      let spot = { x: 0, y: 0 };
+      let found = false;
+      for (let y = 0; y <= plotRows - h && !found; y++) {
+        for (let x = 0; x <= plotCols - w && !found; x++) {
+          if (!overlaps(x, y)) { spot = { x, y }; found = true; }
+        }
+      }
 
-      // 2. Create the bed (planter) sized to the quiz dimensions
-      await addDoc(collection(db, 'planters'), {
+      // 1. Create the bed (planter) inside this plot
+      const bedRef = await addDoc(collection(db, 'planters'), {
         ownerUid: user.uid,
-        plotId: plotRef.id,
-        name: `${bedName.trim()} bed`,
+        plotId,
+        name: bedName.trim() || 'New Bed',
         type: 'Raised Bed',
-        gridPosition: { x: 0, y: 0 },
+        gridPosition: spot,
         size: { w, h },
         color: '#4CAF50',
         createdAt: serverTimestamp()
       });
 
-      // 3. Create one inhabitant per chosen plant — unmapped so they land in the rail
+      // 2. Create one inhabitant per chosen plant — unmapped so they land in the rail
       const picks: PlantInfo[] = [...selected].map(i => PLANT_DATABASE[i]);
       for (const plant of picks) {
         await addDoc(collection(db, 'inhabitants'), {
@@ -105,16 +117,20 @@ export default function BedBuildQuiz({ onClose, onComplete }: BedBuildQuizProps)
           waterFreq: plant.water,
           sunExposure: plant.sun,
           status: 'Pending',
-          plotId: plotRef.id,
+          plotId,
           gridPosition: { x: 0, y: 0 },
           createdAt: serverTimestamp()
         });
       }
 
-      toast.success(`${bedName.trim()} built with ${picks.length} plant${picks.length === 1 ? '' : 's'} — drag them onto the bed!`);
-      onComplete(plotRef.id);
+      toast.success(
+        picks.length > 0
+          ? `${bedName.trim() || 'Bed'} built with ${picks.length} plant${picks.length === 1 ? '' : 's'} — drag them onto the bed!`
+          : `${bedName.trim() || 'Bed'} added to ${plotName}.`
+      );
+      onComplete(bedRef.id);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'spatial_plots');
+      handleFirestoreError(error, OperationType.CREATE, 'planters');
       setIsSaving(false);
     }
   };
@@ -139,7 +155,7 @@ export default function BedBuildQuiz({ onClose, onComplete }: BedBuildQuizProps)
         {/* Header */}
         <div className="p-6 pb-0 flex items-start justify-between">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-primary">Bed Build Quiz</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-primary">New bed · {plotName}</p>
             <h3 className="text-2xl font-headline font-black tracking-tight mt-1">
               {step === 0 && 'Tell us about your bed'}
               {step === 1 && 'Choose what to grow'}
@@ -180,18 +196,21 @@ export default function BedBuildQuiz({ onClose, onComplete }: BedBuildQuizProps)
                   <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-1">Width (ft)</label>
                     <input
-                      type="number" min={1} max={30} value={widthFt} onChange={e => setWidthFt(e.target.value)}
+                      type="number" min={1} max={maxW} value={widthFt} onChange={e => setWidthFt(e.target.value)}
                       className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20"
                     />
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-1">Depth (ft)</label>
                     <input
-                      type="number" min={1} max={20} value={depthFt} onChange={e => setDepthFt(e.target.value)}
+                      type="number" min={1} max={maxH} value={depthFt} onChange={e => setDepthFt(e.target.value)}
                       className="w-full bg-surface-container-low border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 focus:ring-primary/20"
                     />
                   </div>
                 </div>
+                <p className="text-[11px] font-bold text-on-surface-variant/70 ml-1 -mt-2">
+                  {plotName} is {maxW} × {maxH} ft — the bed has to fit inside it.
+                </p>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/60 ml-1">Sun exposure</label>
                   <div className="flex gap-2">
@@ -249,7 +268,7 @@ export default function BedBuildQuiz({ onClose, onComplete }: BedBuildQuizProps)
                         className={cn('relative rounded-2xl overflow-hidden border-2 text-left transition-all group',
                           isSel ? 'border-primary shadow-lg shadow-primary/20' : 'border-transparent hover:border-primary/40')}>
                         <div className="aspect-square bg-stone-100 overflow-hidden">
-                          <img src={p.image} alt={p.name} loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition-transform" referrerPolicy="no-referrer" />
+                          <PlantImage src={p.image} alt={p.name} loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                         </div>
                         <div className="p-2.5 bg-white">
                           <p className="text-xs font-black truncate">{p.name}</p>
@@ -286,7 +305,7 @@ export default function BedBuildQuiz({ onClose, onComplete }: BedBuildQuizProps)
                       return (
                         <div key={i} className="shrink-0 snap-start w-20 flex flex-col items-center gap-1.5">
                           <div className="w-16 h-16 rounded-2xl overflow-hidden border-2 border-primary/30 shadow-sm">
-                            <img src={p.image} alt={p.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            <PlantImage src={p.image} alt={p.name} className="w-full h-full object-cover" />
                           </div>
                           <span className="text-[10px] font-bold text-center leading-tight line-clamp-2">{p.name}</span>
                         </div>
@@ -319,14 +338,14 @@ export default function BedBuildQuiz({ onClose, onComplete }: BedBuildQuizProps)
           {step < 2 ? (
             <button
               onClick={() => setStep(s => s + 1)}
-              disabled={step === 0 ? !canNextStep1 : !canFinish}
+              disabled={step === 0 && !canNextStep1}
               className="px-8 py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:scale-[1.02] transition-all flex items-center gap-2 disabled:opacity-40 disabled:hover:scale-100">
               {step === 0 ? 'Pick plants' : 'Review'} <ArrowRight size={18} />
             </button>
           ) : (
             <button
               onClick={handleBuild}
-              disabled={!canFinish || isSaving}
+              disabled={isSaving}
               className="px-8 py-4 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20 hover:scale-[1.02] transition-all flex items-center gap-2 disabled:opacity-40 disabled:hover:scale-100">
               {isSaving ? <><Loader2 size={18} className="animate-spin" /> Building...</> : <><Check size={18} /> Build my bed</>}
             </button>

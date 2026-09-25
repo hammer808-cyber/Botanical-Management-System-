@@ -8,7 +8,7 @@ import { cn } from '@/src/lib/utils';
 import { toast } from 'sonner';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
-import BedBuildQuiz from './BedBuildQuiz';
+import PlotCreateModal from './PlotCreateModal';
 import PlotEditForm, { PlotEditData } from './PlotEditForm';
 import { countPlanted, countWaiting } from '../lib/plotStats';
 
@@ -488,10 +488,10 @@ export default function Plots() {
         </div>
       </div>
 
-      {/* Bed Build Quiz — replaces the old quick-add plot modal */}
+      {/* New Plot — name, location, footprint. Beds get added inside the plot. */}
       <AnimatePresence>
         {showAddPlot && (
-          <BedBuildQuiz
+          <PlotCreateModal
             onClose={() => setShowAddPlot(false)}
             onComplete={(plotId) => {
               setShowAddPlot(false);

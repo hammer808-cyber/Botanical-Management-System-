@@ -94,6 +94,8 @@ import {
 } from '../services/botanyService';
 import { getThreatsForPlant, type PlantThreat } from '../constants/threats';
 import PlantHealthDrawer from './PlantHealthDrawer';
+import PlantImage from './PlantImage';
+import BedBuildQuiz from './BedBuildQuiz';
 import ThreatCard from './ThreatCard';
 
 const GARDEN_JOKES = [
@@ -225,14 +227,13 @@ export default function PlotDetail() {
   const baseCell = wrapWidth > 0 ? Math.max(8, Math.floor((wrapWidth - GRID_PAD * 2) / COLS)) : 24;
   const cell = baseCell * zoom;
 
-  const [isAddingPlanter, setIsAddingPlanter] = useState(false);
+  const [showBedQuiz, setShowBedQuiz] = useState(false);
   const [isEditingPlot, setIsEditingPlot] = useState(false);
   const [isAddingLog, setIsAddingLog] = useState(false);
   const [isAddingTask, setIsAddingTask] = useState(false);
   const [isWeedWarriorOpen, setIsWeedWarriorOpen] = useState(false);
   const [conflictModalData, setConflictModalData] = useState<{ isOpen: boolean; message: string; action: string; conflictingAction: string; conflictingDate: string } | null>(null);
   const [editingPlanter, setEditingPlanter] = useState<any>(null);
-  const [newPlanterData, setNewPlanterData] = useState({ name: 'New Bed', type: 'Raised Bed', w: 4, h: 2, color: '#4CAF50' });
   const [newLog, setNewLog] = useState({ action: '', notes: '' });
   const [newTask, setNewTask] = useState('');
   const [quickTips, setQuickTips] = useState<string>('');
@@ -696,33 +697,6 @@ export default function PlotDetail() {
     }
   };
 
-  const addPlanter = async () => {
-    if (!user || !plotId || isSaving) return;
-    setIsSaving(true);
-    try {
-      await addDoc(collection(db, 'planters'), {
-        ownerUid: user.uid,
-        plotId: plotId,
-        name: newPlanterData.name,
-        type: newPlanterData.type,
-        gridPosition: { x: 0, y: 0 },
-        size: { w: newPlanterData.w, h: newPlanterData.h },
-        color: newPlanterData.color,
-        createdAt: serverTimestamp()
-      });
-      
-      toast.success('New bed added to plot');
-      
-      setTimeout(() => {
-        setIsAddingPlanter(false);
-        setIsSaving(false);
-      }, 500);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'planters');
-      setIsSaving(false);
-    }
-  };
-
   const handleUpdatePlot = async (data: PlotEditData) => {
     if (!plotId || isSaving) return;
 
@@ -1096,7 +1070,7 @@ export default function PlotDetail() {
                       <div key={p.id} className="flex flex-col items-center gap-1 shrink-0 w-14">
                         <div className="w-12 h-12 rounded-full bg-primary/10 border border-primary/20 overflow-hidden flex items-center justify-center">
                           {p.image ? (
-                            <img src={p.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            <PlantImage src={p.image} className="w-full h-full object-cover" />
                           ) : (
                             <Leaf size={18} className="text-primary" />
                           )}
@@ -1231,7 +1205,7 @@ export default function PlotDetail() {
             <button onClick={() => setZoom(prev => Math.min(2, prev + 0.1))} className="p-2 hover:bg-surface-container-high rounded-lg transition-colors"><Maximize2 size={20} /></button>
           </div>
           <button 
-            onClick={() => setIsAddingPlanter(true)}
+            onClick={() => setShowBedQuiz(true)}
             className="flex items-center gap-2 px-8 py-4 bg-primary text-white rounded-2xl font-black text-sm hover:shadow-lg transition-all"
           >
             <Plus size={20} /> Add Bed
@@ -1946,92 +1920,18 @@ export default function PlotDetail() {
         itemCount={1}
         isDeleting={isDeletingConfirmed}
       />
+      {/* Bed Build Quiz — the one place beds get added */}
       <AnimatePresence>
-        {isAddingPlanter && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-white rounded-[2.5rem] w-full max-w-md overflow-hidden shadow-2xl"
-            >
-              <div className="p-8 space-y-8">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-2xl font-black font-headline tracking-tight">Add Garden Bed</h3>
-                    <p className="text-xs text-on-surface-variant font-medium uppercase tracking-widest">Define dimensions and type</p>
-                  </div>
-                  <button onClick={() => setIsAddingPlanter(false)} className="p-2 hover:bg-stone-100 rounded-full transition-colors"><X /></button>
-                </div>
-
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Bed Name</label>
-                    <input 
-                      type="text" 
-                      value={newPlanterData.name}
-                      onChange={(e) => setNewPlanterData({...newPlanterData, name: e.target.value})}
-                      className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20"
-                      placeholder="e.g. Tomato Bed"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Bed Type</label>
-                    <select 
-                      value={newPlanterData.type}
-                      onChange={(e) => setNewPlanterData({...newPlanterData, type: e.target.value})}
-                      className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20 appearance-none"
-                    >
-                      <option>Raised Bed</option>
-                      <option>In-Ground Row</option>
-                      <option>Greenhouse Bench</option>
-                      <option>Vertical Wall</option>
-                      <option>Container Group</option>
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Width (Cells)</label>
-                      <input 
-                        type="number" 
-                        value={newPlanterData.w}
-                        onChange={(e) => setNewPlanterData({...newPlanterData, w: parseInt(e.target.value)})}
-                        className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Height (Cells)</label>
-                      <input 
-                        type="number" 
-                        value={newPlanterData.h}
-                        onChange={(e) => setNewPlanterData({...newPlanterData, h: parseInt(e.target.value)})}
-                        className="w-full bg-stone-100 border-none rounded-2xl px-6 py-4 font-bold focus:ring-2 ring-primary/20"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <button 
-                  onClick={addPlanter}
-                  disabled={isSaving}
-                  className="w-full bg-primary text-white font-black py-5 rounded-2xl hover:shadow-lg transition-all flex items-center justify-center gap-3"
-                >
-                  {isSaving ? (
-                    <>
-                      <Check size={20} className="animate-bounce" />
-                      Added!
-                    </>
-                  ) : (
-                    <>
-                      <Check size={20} /> Add to Visual Map
-                    </>
-                  )}
-                </button>
-              </div>
-            </motion.div>
-          </div>
+        {showBedQuiz && plotId && (
+          <BedBuildQuiz
+            plotId={plotId}
+            plotName={plot?.name || 'Plot'}
+            plotCols={COLS}
+            plotRows={ROWS}
+            existingBeds={planters}
+            onClose={() => setShowBedQuiz(false)}
+            onComplete={() => setShowBedQuiz(false)}
+          />
         )}
       </AnimatePresence>
 
@@ -2316,7 +2216,7 @@ function DraggablePlantIcon({ inhabitant, compact = false }: { inhabitant: Inhab
       >
         <div className="w-14 h-14 rounded-2xl overflow-hidden border-2 border-primary/30 bg-primary/5 shadow-sm flex items-center justify-center">
           {inhabitant.image ? (
-            <img src={inhabitant.image} alt={inhabitant.name} className="w-full h-full object-cover pointer-events-none" referrerPolicy="no-referrer" />
+            <PlantImage src={inhabitant.image} alt={inhabitant.name} className="w-full h-full object-cover pointer-events-none" />
           ) : (
             <Leaf size={22} className="text-primary" />
           )}
@@ -2347,7 +2247,7 @@ function DraggablePlantIcon({ inhabitant, compact = false }: { inhabitant: Inhab
       )}
       <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center overflow-hidden">
         {inhabitant.image ? (
-          <img src={inhabitant.image} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+          <PlantImage src={inhabitant.image} className="w-full h-full object-cover" />
         ) : (
           <Leaf size={20} className="text-primary" />
         )}
@@ -2428,7 +2328,7 @@ function BedPlantDot({ inhabitant, cell, onSelect }: { inhabitant: Inhabitant; c
       data-tooltip={inhabitant.name}
     >
       {inhabitant.image ? (
-        <img src={inhabitant.image} className="w-full h-full object-cover pointer-events-none" referrerPolicy="no-referrer" />
+        <PlantImage src={inhabitant.image} className="w-full h-full object-cover pointer-events-none" />
       ) : (
         <Leaf size={Math.max(6, cell / 3)} className="text-primary" />
       )}
@@ -2578,7 +2478,7 @@ function DraggableItem({ id, type, position, size, cell, image, name, activeLaye
       data-tooltip={name}
     >
       {image ? (
-        <img src={image} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+        <PlantImage src={image} className="w-full h-full object-cover" />
       ) : (
         <Leaf size={Math.max(10, cell * 0.66)} className="text-primary" />
       )}

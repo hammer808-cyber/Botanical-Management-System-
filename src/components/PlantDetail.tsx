@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Heart, Share2, Droplets, Sun, Thermometer, Info, Calendar, Scissors, AlertCircle, ChevronRight, Check, Activity, X, BookOpen, Trash2, Settings2, ClipboardList, Plus, Loader2, CheckCircle2, Clock } from 'lucide-react';
+import { ArrowLeft, Heart, Share2, Droplets, Sun, Thermometer, Info, Calendar, Scissors, AlertCircle, ChevronRight, Check, Activity, X, BookOpen, Trash2, Settings2, ClipboardList, Plus, Loader2, CheckCircle2, Clock, Stethoscope } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import DatePicker from 'react-datepicker';
 import "react-datepicker/dist/react-datepicker.css";
@@ -14,6 +14,7 @@ import { calculateGDD, calculateVigorIndex, processInhabitantEliteMetrics } from
 import { fetchLongBeachWeather } from '../services/weatherService';
 import { format } from 'date-fns';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
+import HealthCheckWizard from './HealthCheckWizard';
 
 export default function PlantDetail() {
   const { user } = useFirebase();
@@ -25,6 +26,7 @@ export default function PlantDetail() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [plant, setPlant] = useState<Inhabitant | null>(null);
+  const [showHealthCheck, setShowHealthCheck] = useState(false);
   const [treatments, setTreatments] = useState<any[]>([]);
   const [taskHistory, setTaskHistory] = useState<any[]>([]);
   const [activeTasks, setActiveTasks] = useState<any[]>([]);
@@ -505,7 +507,13 @@ export default function PlantDetail() {
                     </p>
                   </div>
                 </div>
-                <div className="flex-1 flex justify-end">
+                <div className="flex-1 flex justify-end gap-2">
+                  <button 
+                    onClick={() => setShowHealthCheck(true)}
+                    className="bg-white border-2 border-primary/30 text-primary px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-2 hover:scale-105 active:scale-95 transition-all"
+                  >
+                    <Stethoscope size={16} /> Quick check
+                  </button>
                   <button 
                     onClick={handleWaterNow}
                     className="bg-primary text-white px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-primary/20 hover:scale-105 active:scale-95 transition-all"
@@ -750,6 +758,16 @@ export default function PlantDetail() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showHealthCheck && plant && (
+          <HealthCheckWizard
+            plant={plant}
+            onClose={() => setShowHealthCheck(false)}
+            onDone={(v) => setPlant({ ...plant, vigorIndex: v })}
+          />
         )}
       </AnimatePresence>
 

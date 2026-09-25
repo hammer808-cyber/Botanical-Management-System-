@@ -186,8 +186,7 @@ export function calculateVigor(
 }
 
 /** Average vigor across a set of plants; null when none have a score (renders as "—"). */
-export function averageVigor(plants: Inhabitant[]): number | null {
-  const scored = plants.filter((p) => typeof p.vigorIndex === 'number');
+export function averageVigor(plants: Inhabitant[]): number | null {  const scored = plants.filter((p) => typeof p.vigorIndex === 'number');
   if (scored.length === 0) return null;
   return Math.round(scored.reduce((a, p) => a + (p.vigorIndex || 0), 0) / scored.length);
 }
@@ -255,4 +254,43 @@ export async function refreshStaleVigor(
   for (const plant of stale.slice(0, 25)) {
     await recalculateVigor(plant, logs, treatments);
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Quick health-check snapshots                                        */
+/* ------------------------------------------------------------------ */
+
+export interface HealthCheckAnswers {
+  watered: 'yes' | 'no';
+  leaves: 'healthy' | 'yellowing' | 'spots' | 'wilting';
+  pests: 'none' | 'pests' | 'disease' | 'unsure';
+  overall: 'thriving' | 'okay' | 'struggling';
+}
+
+const SNAPSHOT_SCORES: Record<keyof HealthCheckAnswers, Record<string, number>> = {
+  watered: { yes: 100, no: 45 },
+  leaves: { healthy: 100, yellowing: 60, spots: 50, wilting: 35 },
+  pests: { none: 100, unsure: 70, pests: 40, disease: 40 },
+  overall: { thriving: 100, okay: 70, struggling: 30 },
+};
+
+/**
+ * Score a 4-question health check (0-100). This is a snapshot — callers
+ * blend it into the persisted vigor (e.g. 30% weight) so a quick check
+ * updates the score without replacing it.
+ */
+export function scoreHealthSnapshot(answers: HealthCheckAnswers): number {
+  const parts = (Object.keys(SNAPSHOT_SCORES) as (keyof HealthCheckAnswers)[]).map(
+    (k) => SNAPSHOT_SCORES[k][answers[k]] ?? 60
+  );
+  return Math.round(parts.reduce((a, b) => a + b, 0) / parts.length);
+}
+
+/**
+ * Blend a snapshot into an existing vigor score. The check nudges;
+ * the event-based score keeps the majority of the weight.
+ */
+export function blendSnapshot(currentVigor: number | null, snapshot: number, weight = 0.3): number {
+  const base = currentVigor ?? snapshot;
+  return Math.round(base * (1 - weight) + snapshot * weight);
 }

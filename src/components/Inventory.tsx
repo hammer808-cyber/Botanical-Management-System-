@@ -7,6 +7,7 @@ import { useFirebase } from '../contexts/FirebaseContext';
 import { useActivePlot } from '../contexts/ActivePlotContext';
 import { db, collection, query, where, onSnapshot, handleFirestoreError, OperationType, addDoc, serverTimestamp, deleteDoc, doc, deleteField, batchDelete } from '../firebase';
 import { getPlantInfo } from '../constants/plants';
+import { PLANT_PLACEHOLDER } from '../lib/plantImage';
 import { Inhabitant, SpatialPlot, EventLog } from '../types';
 import { calculateVigorIndex } from '../lib/botany';
 import { Trash2, CheckSquare, Square, Table, LayoutGrid, ExternalLink, X, MapPin, Edit2, Download, CheckCircle, Plus, ChevronUp, ChevronDown, Activity, Droplets as WaterIcon, Bug } from 'lucide-react';
@@ -214,7 +215,7 @@ export default function Inventory() {
         waterFreq: newPlantData.waterFreq,
         sunExposure: newPlantData.sunExposure,
         notes: newPlantData.notes || '',
-        image: `https://picsum.photos/seed/${newPlantData.name}/800/600`,
+        image: getPlantInfo(newPlantData.name)?.image || PLANT_PLACEHOLDER,
         status: 'Healthy',
         vigor: 5,
         daysActive: 0,
