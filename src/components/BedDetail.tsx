@@ -106,7 +106,25 @@ export default function BedDetail() {
   );
   const bedVigor = averageVigor(bedPlants);
 
-  const cellPx = 'min(17vw, 68px)';
+  /**
+   * Resolve a plant's cell within this bed. The app-wide convention is
+   * plot-global coordinates (cell = gridPosition - bed.gridPosition), but a
+   * tap-to-place bug on Sep 24 wrote bed-local coordinates for a few plants.
+   * Prefer the global reading; fall back to the bed-local one so misplaced
+   * plants still render (PlotDetail repairs the stored data on load).
+   */
+  const cellOf = (pl: Inhabitant): { gx: number; gy: number } | null => {
+    if (!pl.gridPosition || !bed) return null;
+    const gx = pl.gridPosition.x - bed.gridPosition.x;
+    const gy = pl.gridPosition.y - bed.gridPosition.y;
+    if (gx >= 0 && gy >= 0 && gx < bed.size.w && gy < bed.size.h) return { gx, gy };
+    if (pl.planterId === bed.id) {
+      const lx = pl.gridPosition.x;
+      const ly = pl.gridPosition.y;
+      if (lx >= 0 && ly >= 0 && lx < bed.size.w && ly < bed.size.h) return { gx: lx, gy: ly };
+    }
+    return null;
+  };
 
   return (
     <div className="p-4 sm:p-6 max-w-3xl mx-auto space-y-6">
@@ -138,9 +156,10 @@ export default function BedDetail() {
         </div>
         <div className="flex justify-center">
           <div
-            className="grid gap-1.5 p-3 rounded-2xl"
+            className="grid gap-1.5 p-3 rounded-2xl w-full"
             style={{
-              gridTemplateColumns: `repeat(${bed.size.w}, ${cellPx})`,
+              gridTemplateColumns: `repeat(${bed.size.w}, minmax(0, 1fr))`,
+              maxWidth: bed.size.w * 76 + 24,
               backgroundColor: `${bed.color || '#8fce62'}22`,
               border: `2px solid ${bed.color || '#8fce62'}55`,
             }}
@@ -148,19 +167,19 @@ export default function BedDetail() {
             {Array.from({ length: bed.size.w * bed.size.h }).map((_, i) => {
               const gx = i % bed.size.w;
               const gy = Math.floor(i / bed.size.w);
-              const plant = bedPlants.find(
-                (p) => p.gridPosition && p.gridPosition.x - bed.gridPosition.x === gx && p.gridPosition.y - bed.gridPosition.y === gy
-              );
+              const plant = bedPlants.find((pl) => {
+                const c = cellOf(pl);
+                return c !== null && c.gx === gx && c.gy === gy;
+              });
               return (
                 <button
                   key={i}
                   onClick={() => plant && navigate(`/plant/${plant.id}`)}
                   disabled={!plant}
                   className={cn(
-                    'rounded-xl flex items-center justify-center overflow-hidden transition-transform',
+                    'rounded-xl aspect-square w-full flex items-center justify-center overflow-hidden transition-transform',
                     plant ? 'bg-white border-2 border-primary/40 shadow-sm hover:scale-105 cursor-pointer' : 'border border-dashed border-primary/15'
                   )}
-                  style={{ width: cellPx, height: cellPx }}
                   aria-label={plant ? plant.name : `Empty cell ${gx + 1}, ${gy + 1}`}
                 >
                   {plant ? (
