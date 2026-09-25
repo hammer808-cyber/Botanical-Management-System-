@@ -93,7 +93,7 @@ export async function duplicateBed(opts: {
       planterId: bedRef.id,
       name: p.name || 'Plant',
       type: validTypes.includes(p.type || '') ? p.type : 'Vegetable',
-      status: p.status || 'Planted',
+      status: p.status || 'Pending',
       gridPosition: { x: gx, y: gy },
       createdAt: serverTimestamp(),
     };

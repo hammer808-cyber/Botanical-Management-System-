@@ -5,7 +5,10 @@ import { db } from '../firebase';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { averageVigor } from '../lib/vigor';
 import { useActivePlot } from '../contexts/ActivePlotContext';
-import { ArrowLeft, Leaf, Ruler, Activity, Plus, Stethoscope, Pencil } from 'lucide-react';
+import { ArrowLeft, Leaf, Ruler, Activity, Plus, Stethoscope, Pencil, Copy } from 'lucide-react';
+import { toast } from 'sonner';
+import { duplicateBed } from '../lib/duplicateBed';
+import { handleFirestoreError, OperationType } from '../firebase';
 import { cn } from '@/src/lib/utils';
 import { AnimatePresence } from 'motion/react';
 import HealthCheckWizard from './HealthCheckWizard';
@@ -43,6 +46,32 @@ export default function BedDetail() {
   const [otherBeds, setOtherBeds] = useState<BedLike[]>([]);
   const [gridDims, setGridDims] = useState({ cols: 30, rows: 20 });
   const [showEditor, setShowEditor] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
+
+  const handleDuplicateBed = async () => {
+    if (!user || !bed || !plotId || duplicating) return;
+    setDuplicating(true);
+    try {
+      const result = await duplicateBed({
+        bed: { ...bed, plotId, ownerUid: user.uid },
+        plants,
+        siblingBeds: otherBeds,
+        plotCols: gridDims.cols,
+        plotRows: gridDims.rows,
+      });
+      if (!result) {
+        toast.warning('No room for a copy — the plot is full.');
+      } else {
+        toast.success(
+          `Duplicated as "${result.name}"${result.plantsCopied ? ` with ${result.plantsCopied} plant${result.plantsCopied === 1 ? '' : 's'}` : ''}`
+        );
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'planters');
+    } finally {
+      setDuplicating(false);
+    }
+  };
 
   useEffect(() => {
     if (plotId) setActivePlotId(plotId);
@@ -165,6 +194,14 @@ export default function BedDetail() {
           <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Bed vigor</p>
           <p className="font-black text-2xl">{bedVigor === null ? '—' : `${bedVigor}%`}</p>
         </div>
+        <button
+          onClick={handleDuplicateBed}
+          disabled={duplicating}
+          className="p-3 rounded-2xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-colors touch-target disabled:opacity-50"
+          aria-label={`Duplicate ${bed.name || 'bed'}`}
+        >
+          <Copy size={18} />
+        </button>
         <button
           onClick={() => setShowEditor(true)}
           className="p-3 rounded-2xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-colors touch-target"

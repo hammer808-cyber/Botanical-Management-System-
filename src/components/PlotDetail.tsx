@@ -55,7 +55,8 @@ import {
   Target,
   AlertTriangle,
   ShieldAlert,
-  ChevronRight
+  ChevronRight,
+  Copy
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { logEvent } from '../services/eventService';
@@ -67,6 +68,7 @@ import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import PlotEditForm, { PlotEditData } from './PlotEditForm';
 import BedEditModal from './BedEditModal';
 import { isPlanted, countPlanted, countWaiting } from '../lib/plotStats';
+import { duplicateBed } from '../lib/duplicateBed';
 import { recalculateVigor, refreshStaleVigor, averageVigor } from '../lib/vigor';
 import WeedWarriorWizard from './WeedWarriorWizard';
 import TreatmentConflictModal from './TreatmentConflictModal';
@@ -303,7 +305,7 @@ export default function PlotDetail() {
     const inhabitantsQ = query(collection(db, 'inhabitants'), where('plotId', '==', plotId), where('ownerUid', '==', user.uid));
     const unsubscribeInhabitants = onSnapshot(inhabitantsQ, (snapshot) => {
       const allPlotInhabitants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Inhabitant));
-      // Planted = status flipped to 'Planted' on drop, or sitting at a real grid position
+      // Planted = sitting in a bed (planterId set) or at a real grid position
       setInhabitants(allPlotInhabitants.filter(isPlanted));
       // Assigned to this plot but still waiting in the rail
       const assignedNotMapped = allPlotInhabitants.filter(p => !isPlanted(p));
@@ -493,8 +495,9 @@ export default function PlotDetail() {
         plotId: plotId,
         gridPosition: newPos,
         planterId: targetPlanter.id,
-        // First real placement: Pending -> Planted
-        ...(inhabitant.status === 'Pending' ? { status: 'Planted' as const } : {}),
+        // NOTE: no status flip here — 'Planted' is not in the Firestore
+        // status enum, so writing it rejects the whole update and the
+        // plant bounces back to the rail. planterId marks placement.
         updatedAt: serverTimestamp()
       });
 
@@ -754,6 +757,31 @@ export default function PlotDetail() {
       toast.success('Bed rotated');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `planters/${id}`);
+    }
+  };
+
+  const handleDuplicateBed = async (planter: Planter) => {
+    if (!user || !plotId) return;
+    setSelectedPlanterId(null);
+    try {
+      const result = await duplicateBed({
+        bed: { ...planter, plotId, ownerUid: user.uid },
+        plants: [...inhabitants, ...availableInhabitants],
+        siblingBeds: planters
+          .filter((p) => p.id !== planter.id)
+          .map((p) => ({ id: p.id, name: p.name, gridPosition: p.gridPosition, size: p.size, color: p.color })),
+        plotCols: COLS,
+        plotRows: ROWS,
+      });
+      if (!result) {
+        toast.warning('No room for a copy — the plot is full.');
+      } else {
+        toast.success(
+          `Duplicated as "${result.name}"${result.plantsCopied ? ` with ${result.plantsCopied} plant${result.plantsCopied === 1 ? '' : 's'}` : ''}`
+        );
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'planters');
     }
   };
 
@@ -1141,13 +1169,20 @@ export default function PlotDetail() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-4 gap-3">
                   <button
                     onClick={() => rotatePlanter(planter.id)}
                     className="flex flex-col items-center gap-1 py-3 rounded-2xl bg-primary/10 text-primary font-black text-xs hover:bg-primary/20 transition-colors"
                   >
                     <RotateCw size={20} />
                     Rotate
+                  </button>
+                  <button
+                    onClick={() => handleDuplicateBed(planter)}
+                    className="flex flex-col items-center gap-1 py-3 rounded-2xl bg-stone-100 text-on-surface font-black text-xs hover:bg-stone-200 transition-colors"
+                  >
+                    <Copy size={20} />
+                    Duplicate
                   </button>
                   <button
                     onClick={() => { setSelectedPlanterId(null); setEditingPlanter(planter); }}
