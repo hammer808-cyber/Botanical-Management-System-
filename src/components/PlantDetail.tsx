@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Heart, Share2, Droplets, Sun, Thermometer, Info, Calendar, Scissors, AlertCircle, ChevronRight, Check, Activity, X, BookOpen, Trash2, Settings2, ClipboardList, Plus, Loader2, CheckCircle2, Clock, Stethoscope } from 'lucide-react';
+import { ArrowLeft, Heart, Share2, Droplets, Sun, Thermometer, Info, Calendar, Scissors, AlertCircle, ChevronRight, Check, Activity, X, BookOpen, Trash2, Settings2, ClipboardList, Plus, Loader2, CheckCircle2, Clock, Stethoscope, RefreshCw } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import DatePicker from 'react-datepicker';
 import "react-datepicker/dist/react-datepicker.css";
@@ -15,6 +15,8 @@ import { fetchLongBeachWeather } from '../services/weatherService';
 import { format } from 'date-fns';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import HealthCheckWizard from './HealthCheckWizard';
+import { getPlantInfo } from '../constants/plants';
+import { PLANT_PLACEHOLDER } from '../lib/plantImage';
 
 export default function PlantDetail() {
   const { user } = useFirebase();
@@ -27,6 +29,23 @@ export default function PlantDetail() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [plant, setPlant] = useState<Inhabitant | null>(null);
   const [showHealthCheck, setShowHealthCheck] = useState(false);
+  const [refreshingPhoto, setRefreshingPhoto] = useState(false);
+
+  const refreshPhoto = async () => {
+    const info = getPlantInfo(plant.name);
+    if (!info?.image) { toast.info('No library photo for this plant yet'); return; }
+    if (plant.image === info.image) { toast.info('Already using the latest photo'); return; }
+    setRefreshingPhoto(true);
+    try {
+      await updateDoc(doc(db, 'inhabitants', id), { image: info.image });
+      toast.success('Photo refreshed');
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, 'inhabitant');
+      toast.error('Could not refresh the photo');
+    } finally {
+      setRefreshingPhoto(false);
+    }
+  };
   const [treatments, setTreatments] = useState<any[]>([]);
   const [taskHistory, setTaskHistory] = useState<any[]>([]);
   const [activeTasks, setActiveTasks] = useState<any[]>([]);
@@ -386,10 +405,11 @@ export default function PlantDetail() {
           initial={{ scale: 1.1 }}
           animate={{ scale: 1 }}
           transition={{ duration: 1.5 }}
-          src={plant.image} 
-          alt={plant.name} 
+          src={plant.image || PLANT_PLACEHOLDER}
+          alt={plant.name}
           className="w-full h-full object-cover"
           referrerPolicy="no-referrer"
+          onError={(e) => { e.currentTarget.src = PLANT_PLACEHOLDER; }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-black/40"></div>
         
@@ -420,6 +440,15 @@ export default function PlantDetail() {
               ) : (
                 <Scissors size={20} className="rotate-90" /> // Using Scissors as a placeholder for "Add Photo" if no better icon, but wait, I have Upload or Camera?
               )}
+            </button>
+            <button
+              onClick={refreshPhoto}
+              disabled={refreshingPhoto}
+              className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center text-white hover:bg-primary transition-all active:scale-90 disabled:opacity-50"
+              title="Refresh photo from the plant library"
+              aria-label="Refresh photo from the plant library"
+            >
+              <RefreshCw size={20} className={refreshingPhoto ? 'animate-spin' : ''} />
             </button>
             <button 
               onClick={() => setIsEditing(true)}
