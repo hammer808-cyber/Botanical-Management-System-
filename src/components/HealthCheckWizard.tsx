@@ -110,14 +110,18 @@ export default function HealthCheckWizard({ plant, onClose, onDone, onLogTreatme
       });
 
       // The check itself is an event — structured, queryable later.
+      // event_logs has no "Health Check" type (Observation is the allowed
+      // bucket) and calendar_events has no Observation (Manual is). Sending
+      // "Health Check" for either rejects the write after the plant doc was
+      // already updated, so a retry blends vigor and appends notes again.
       await logEvent({
         ownerUid: user.uid,
         category: 'event_logs',
-        eventType: 'Health Check',
+        eventType: 'Manual',
         data: {
           targetId: plant.id,
           targetType: 'Inhabitant',
-          type: 'Health Check',
+          type: 'Observation',
           plotId: plant.plotId || null,
           notes: checkNote,
           date: new Date().toISOString(),

@@ -12,8 +12,13 @@ import { useNavigate } from 'react-router-dom';
 import { Inhabitant, EventLog } from '../types';
 import { checkTreatmentConflict } from '../services/botanyService';
 import { logEvent } from '../services/eventService';
+import { format } from 'date-fns';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import TreatmentConflictModal from './TreatmentConflictModal';
+
+function isRecoveredStatus(status?: string) {
+  return status === 'Resolved' || status === 'Completed';
+}
 
 const DISEASE_DATABASE = [
   {
@@ -260,7 +265,9 @@ export default function Treatment() {
       const activeLog = treatmentLogs.find(l => l.plantId === id && l.status === 'Active');
       if (activeLog) {
         await updateDoc(doc(db, 'treatments', activeLog.id), {
-          status: 'Resolved',
+          // Rules allow Active | Completed. 'Resolved' rejects the whole update,
+          // so recovery never saved.
+          status: 'Completed',
           successRate: parseInt(rate) || 100,
           resolvedAt: serverTimestamp()
         });
@@ -270,7 +277,7 @@ export default function Treatment() {
         status: 'Healthy',
         needsWater: false
       });
-      const resolvedTreatments = treatmentLogs.map(l => l.id === (activeLog && activeLog.id) ? { ...l, status: 'Resolved', successRate: parseInt(rate) || 100, resolvedAt: new Date() } : l);
+      const resolvedTreatments = treatmentLogs.map(l => l.id === (activeLog && activeLog.id) ? { ...l, status: 'Completed', successRate: parseInt(rate) || 100, resolvedAt: new Date() } : l);
       const resolvedPlant = sickPlants.find(p => p.id === id) || visibleAllPlants.find(p => p.id === id);
       if (resolvedPlant) {
         recalculateVigor({ ...resolvedPlant, status: 'Healthy', needsWater: false } as any, undefined, resolvedTreatments as any).catch(() => {});
@@ -282,7 +289,7 @@ export default function Treatment() {
         ownerUid: user.uid,
         title: `Resolved: ${plant?.name || 'Plant'} recovered`,
         description: `Treatment successful (${rate}%). Plant status returned to Healthy.`,
-        date: new Date().toISOString(),
+        date: format(new Date(), 'yyyy-MM-dd'),
         type: 'Treatment',
         priority: 'Medium',
         relatedId: id,
@@ -699,10 +706,10 @@ export default function Treatment() {
                             <div 
                               className={cn(
                                 "flex items-center gap-2",
-                                log.status === 'Resolved' && "cursor-pointer hover:opacity-80"
+                                isRecoveredStatus(log.status) && "cursor-pointer hover:opacity-80"
                               )}
                               onClick={() => {
-                                if (log.status === 'Resolved') {
+                                if (isRecoveredStatus(log.status)) {
                                   setEditingSuccessRateId(log.id);
                                   setEditSuccessRateValue(String(log.successRate || 0));
                                 }
@@ -719,7 +726,7 @@ export default function Treatment() {
                               </div>
                               <span className={cn(
                                 "text-[10px] font-bold",
-                                log.status === 'Resolved' ? (
+                                isRecoveredStatus(log.status) ? (
                                   (log.successRate || 0) > 70 ? "text-primary" : (log.successRate || 0) > 40 ? "text-tertiary" : "text-error"
                                 ) : "text-on-surface-variant"
                               )}>

@@ -5,7 +5,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '@/src/lib/utils';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { useActivePlot } from '../contexts/ActivePlotContext';
-import { db, collection, query, where, onSnapshot, handleFirestoreError, OperationType, addDoc, serverTimestamp, deleteDoc, doc, deleteField, batchDelete } from '../firebase';
+import { db, collection, query, where, onSnapshot, handleFirestoreError, OperationType, addDoc, serverTimestamp, deleteDoc, doc, batchDelete } from '../firebase';
 import { getPlantInfo } from '../constants/plants';
 import { PLANT_PLACEHOLDER } from '../lib/plantImage';
 import { Inhabitant, SpatialPlot, EventLog } from '../types';
@@ -148,17 +148,23 @@ export default function Inventory() {
     if (!editingPlant) return;
     setIsSaving(true);
     try {
-      await updateDoc(doc(db, 'inhabitants', editingPlant.id), {
+      // plotId/planterId are absent until a plant is placed. Writing them as
+      // undefined makes the client reject the whole edit.
+      const plantPatch: Record<string, unknown> = {
         name: editingPlant.name,
         scientific: editingPlant.scientific || '',
         type: editingPlant.type,
         waterFreq: editingPlant.waterFreq,
         sunExposure: editingPlant.sunExposure,
         notes: editingPlant.notes || '',
-        plotId: editingPlant.plotId,
-        planterId: editingPlant.planterId,
         updatedAt: serverTimestamp()
-      });
+      };
+      if (editingPlant.plotId !== undefined) plantPatch.plotId = editingPlant.plotId ?? null;
+      if (editingPlant.planterId !== undefined) plantPatch.planterId = editingPlant.planterId ?? null;
+      const definedPatch = Object.fromEntries(
+        Object.entries(plantPatch).filter(([, value]) => value !== undefined)
+      );
+      await updateDoc(doc(db, 'inhabitants', editingPlant.id), definedPatch);
       
       toast.success('Plant details updated');
       
@@ -223,8 +229,6 @@ export default function Inventory() {
         nextWatering: format(addDays(new Date(), 2), 'yyyy-MM-dd'),
         tempRange: '65-85°F',
         gridPosition: { x: 0, y: 0 },
-        planterId: deleteField(),
-        plotId: deleteField(),
         createdAt: serverTimestamp()
       };
 

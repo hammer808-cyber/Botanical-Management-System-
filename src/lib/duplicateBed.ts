@@ -2,6 +2,7 @@ import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { Inhabitant } from '../types';
 import type { BedLike } from '../components/BedEditModal';
+import { copyableStatus, findDuplicateSpot } from './writeGuards';
 
 export interface DuplicatableBed extends BedLike {
   plotId: string;
@@ -13,13 +14,6 @@ export interface DuplicateResult {
   id: string;
   name: string;
   plantsCopied: number;
-}
-
-function rectsOverlap(
-  ax: number, ay: number, aw: number, ah: number,
-  bx: number, by: number, bw: number, bh: number
-) {
-  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
 }
 
 function uniqueCopyName(base: string, taken: Set<string>): string {
@@ -49,17 +43,7 @@ export async function duplicateBed(opts: {
   const w = bed.size.w;
   const h = bed.size.h;
 
-  let spot: { x: number; y: number } | null = null;
-  for (let y = 0; y <= plotRows - h && !spot; y++) {
-    for (let x = 0; x <= plotCols - w && !spot; x++) {
-      const hit = siblingBeds.some(
-        (b) =>
-          b.id !== bed.id &&
-          rectsOverlap(x, y, w, h, b.gridPosition.x, b.gridPosition.y, b.size.w, b.size.h)
-      );
-      if (!hit) spot = { x, y };
-    }
-  }
+  const spot = findDuplicateSpot(bed, siblingBeds, plotCols, plotRows);
   if (!spot) return null;
 
   const taken = new Set(siblingBeds.map((b) => b.name));
@@ -93,7 +77,7 @@ export async function duplicateBed(opts: {
       planterId: bedRef.id,
       name: p.name || 'Plant',
       type: validTypes.includes(p.type || '') ? p.type : 'Vegetable',
-      status: p.status || 'Pending',
+      status: copyableStatus(p.status),
       gridPosition: { x: gx, y: gy },
       createdAt: serverTimestamp(),
     };
